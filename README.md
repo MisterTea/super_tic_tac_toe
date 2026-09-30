@@ -37,6 +37,12 @@ For restrictive networks provide TURN through `NEXT_PUBLIC_ICE_SERVERS`, a JSON 
 
 Rules follow https://en.wikipedia.org/wiki/Ultimate_tic-tac-toe: won/full small boards close; being sent to a closed board gives free choice; three claimed boards in a line wins; no playable boards means draw.
 
+## Deployment
+
+The [GitHub repository](https://github.com/MisterTea/super_tic_tac_toe) is connected to the Vercel project `tic-tac-toe-royale` in the `aquinas` team. Pushes to `main` automatically build and deploy production; other branches receive preview deployments through Vercel's Git integration.
+
+Production: [tic-tac-toe-royale-liard.vercel.app](https://tic-tac-toe-royale-liard.vercel.app). Vercel runs the package's install and build scripts, including `postinstall` to copy the self-hosted WebAssembly runtime. The ONNX model is committed, so deployment does not require Python or retraining. Keep local environment files and `.vercel` metadata out of Git; `.env.example` documents optional TURN configuration.
+
 ## Sound and browser tests
 
 X uses a higher placement pitch than O. Wins play a four-note fanfare; losses play a descending filtered-noise woosh. Effects use Web Audio synthesis without remote audio files. Audio unlocks after a user gesture, and the header's sound toggle stores a mute preference locally. New games and late spectator snapshots do not replay old sounds. Spectators hear new placements but have no personal win/loss effect.
