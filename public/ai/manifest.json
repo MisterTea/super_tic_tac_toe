@@ -1,0 +1,17 @@
+{
+  "format": "onnx",
+  "source": "PyTorch BrowserPolicy",
+  "skill_range": [
+    0,
+    1
+  ],
+  "profile_keys": [
+    "radius",
+    "decay",
+    "macro",
+    "depth",
+    "breadth"
+  ],
+  "endpoint": "full-attention trained PyTorch scorer with maximum learned planning budget",
+  "humanCalibrated": false
+}

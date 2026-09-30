@@ -1,0 +1,21 @@
+{
+  "algorithm": "masked actor-critic with frozen self-play opponents",
+  "seed": 7,
+  "updates": 600,
+  "batch": 32,
+  "baseline": {
+    "wins": 101,
+    "draws": 69,
+    "losses": 130,
+    "score": 0.45166666666666666
+  },
+  "evaluation": {
+    "wins": 170,
+    "draws": 48,
+    "losses": 82,
+    "score": 0.6466666666666666
+  },
+  "elapsed_seconds": 630.0855937004089,
+  "opponent": "uniform random, greedy policy, alternating sides",
+  "limitation": "Random-opponent evaluation does not establish strong human-level play."
+}

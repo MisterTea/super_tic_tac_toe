@@ -1,0 +1,99 @@
+{
+  "seed": 4567,
+  "benchmarks": [
+    {
+      "skill": 0,
+      "opponent": "random",
+      "games": 60,
+      "wins": 24,
+      "draws": 10,
+      "losses": 26,
+      "score": 0.48333333333333334
+    },
+    {
+      "skill": 0.25,
+      "opponent": "random",
+      "games": 60,
+      "wins": 36,
+      "draws": 11,
+      "losses": 13,
+      "score": 0.6916666666666667
+    },
+    {
+      "skill": 0.5,
+      "opponent": "random",
+      "games": 60,
+      "wins": 46,
+      "draws": 10,
+      "losses": 4,
+      "score": 0.85
+    },
+    {
+      "skill": 0.75,
+      "opponent": "random",
+      "games": 60,
+      "wins": 52,
+      "draws": 6,
+      "losses": 2,
+      "score": 0.9166666666666666
+    },
+    {
+      "skill": 1,
+      "opponent": "random",
+      "games": 60,
+      "wins": 60,
+      "draws": 0,
+      "losses": 0,
+      "score": 1.0
+    },
+    {
+      "skill": 0,
+      "opponent": "tactical",
+      "games": 60,
+      "wins": 2,
+      "draws": 1,
+      "losses": 57,
+      "score": 0.041666666666666664
+    },
+    {
+      "skill": 0.25,
+      "opponent": "tactical",
+      "games": 60,
+      "wins": 1,
+      "draws": 3,
+      "losses": 56,
+      "score": 0.041666666666666664
+    },
+    {
+      "skill": 0.5,
+      "opponent": "tactical",
+      "games": 60,
+      "wins": 3,
+      "draws": 17,
+      "losses": 40,
+      "score": 0.19166666666666668
+    },
+    {
+      "skill": 0.75,
+      "opponent": "tactical",
+      "games": 60,
+      "wins": 38,
+      "draws": 15,
+      "losses": 7,
+      "score": 0.7583333333333333
+    },
+    {
+      "skill": 1,
+      "opponent": "tactical",
+      "games": 60,
+      "wins": 48,
+      "draws": 12,
+      "losses": 0,
+      "score": 0.9
+    }
+  ],
+  "elapsed_seconds": 40.98017859458923,
+  "humanCalibrated": false,
+  "warning": "Small baseline sweep is diagnostic, not evidence of average middle-school ability or monotonic skill.",
+  "endpoint_engine_at_evaluation": "bounded-depth-3-width-6 (before Monte Carlo endpoint selection)"
+}

@@ -1,0 +1,46 @@
+{
+  "seed": 8801,
+  "games_per_candidate": 60,
+  "candidates": [
+    {
+      "depth": 0,
+      "breadth": 0,
+      "wins": 26,
+      "draws": 26,
+      "losses": 8,
+      "score": 0.65
+    },
+    {
+      "depth": 2,
+      "breadth": 4,
+      "wins": 42,
+      "draws": 15,
+      "losses": 3,
+      "score": 0.825
+    },
+    {
+      "depth": 3,
+      "breadth": 6,
+      "wins": 52,
+      "draws": 6,
+      "losses": 2,
+      "score": 0.9166666666666666
+    },
+    {
+      "depth": 4,
+      "breadth": 8,
+      "wins": 50,
+      "draws": 10,
+      "losses": 0,
+      "score": 0.9166666666666666
+    }
+  ],
+  "selected": {
+    "radius": 12.0,
+    "decay": 0.0,
+    "macro": 1.0,
+    "depth": 3.0,
+    "breadth": 6.0
+  },
+  "elapsed_seconds": 96.85144567489624
+}

@@ -1,0 +1,7 @@
+{
+  "seed": 31,
+  "epochs": 600,
+  "synthetic_loss": 2.530885103624314e-05,
+  "human_fit": null,
+  "calibration": "0.5 is a provisional novice target, not validated middle-school ability."
+}

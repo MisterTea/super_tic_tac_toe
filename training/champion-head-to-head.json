@@ -1,0 +1,24 @@
+{
+  "seed": 6611,
+  "benchmarks": [
+    {
+      "opponent": "raw-policy",
+      "games": 20,
+      "wins": 17,
+      "draws": 2,
+      "losses": 1,
+      "score": 0.9,
+      "seconds": 0.361
+    },
+    {
+      "opponent": "monte-carlo-700",
+      "games": 20,
+      "wins": 4,
+      "draws": 4,
+      "losses": 12,
+      "score": 0.3,
+      "seconds": 41.589
+    }
+  ],
+  "limitation": "Small head-to-head diagnostic, not a proof of optimal play."
+}

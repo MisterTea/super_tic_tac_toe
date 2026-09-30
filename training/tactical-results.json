@@ -1,0 +1,34 @@
+{
+  "algorithm": "REINFORCE with moving reward baseline and frozen-opponent pool",
+  "warm_start": "handcrafted tactical priorities",
+  "seed": 17,
+  "updates": 100,
+  "batch": 16,
+  "baseline": {
+    "wins": 29,
+    "draws": 44,
+    "losses": 27,
+    "score": 0.51
+  },
+  "selected_evaluation": {
+    "wins": 44,
+    "draws": 35,
+    "losses": 21,
+    "score": 0.615
+  },
+  "elapsed_seconds": 57.87789964675903,
+  "weights": [
+    4.937510967254639,
+    3.0738277435302734,
+    100.0004653930664,
+    7.896674156188965,
+    -2.091057777404785,
+    -30.0,
+    -0.030756553635001183,
+    0.09393466264009476,
+    -0.09164102375507355,
+    0.18091730773448944,
+    0.13174709677696228,
+    0.06600315123796463
+  ]
+}

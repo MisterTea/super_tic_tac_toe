@@ -1,0 +1,18 @@
+{
+  "seed": 12345,
+  "policy": "tactical warm start before RL",
+  "benchmarks": [
+    {
+      "opponent": "tactical",
+      "games": 500,
+      "wins": 133,
+      "draws": 195,
+      "losses": 172,
+      "score": 0.461,
+      "approximate_95_percent_interval": [
+        0.4269070900946896,
+        0.49509290990531046
+      ]
+    }
+  ]
+}

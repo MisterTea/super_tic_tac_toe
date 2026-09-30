@@ -1,0 +1,16 @@
+node_modules/
+.next/
+__pycache__/
+.venv/
+training/checkpoints/
+*.tsbuildinfo
+test-results/
+playwright-report/
+preview.png
+skill-preview.png
+public/ai/ort/
+
+.vercel
+.env*
+!.env.example
+production-preview.png

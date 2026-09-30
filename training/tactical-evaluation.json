@@ -1,0 +1,31 @@
+{
+  "seed": 12345,
+  "policy": "greedy masked actor",
+  "benchmarks": [
+    {
+      "opponent": "random",
+      "games": 500,
+      "wins": 483,
+      "draws": 15,
+      "losses": 2,
+      "score": 0.981,
+      "approximate_95_percent_interval": [
+        0.9717396180344278,
+        0.9902603819655722
+      ]
+    },
+    {
+      "opponent": "tactical",
+      "games": 500,
+      "wins": 193,
+      "draws": 172,
+      "losses": 135,
+      "score": 0.558,
+      "approximate_95_percent_interval": [
+        0.522833654456031,
+        0.5931663455439691
+      ]
+    }
+  ],
+  "limitation": "Tactical baseline is a shallow heuristic, not a search engine or human skill rating."
+}
