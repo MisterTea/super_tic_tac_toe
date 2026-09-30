@@ -4,9 +4,12 @@ let poolInstance: Pool | null = null;
 
 export function getPool(): Pool {
   if (!poolInstance) {
-    const connectionString =
-      process.env.DATABASE_URL ||
-      "postgresql://neondb_owner:npg_BAs2IGVQCf8J@ep-frosty-glade-b5bss8v5.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString?.trim()) {
+      throw new Error(
+        "DATABASE_URL is required. Set it in .env.local or Vercel environment variables.",
+      );
+    }
     poolInstance = new Pool({
       connectionString,
       max: 20,

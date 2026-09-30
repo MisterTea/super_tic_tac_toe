@@ -13,7 +13,7 @@ The public `/leaderboard` page and home page show up to ten signed-in accounts o
 ## Set up
 
 1. Run `npm install`.
-2. Configure `DATABASE_URL` in `.env.local` pointing to your Neon PostgreSQL connection string (with `?sslmode=require`).
+2. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to your Neon PostgreSQL connection string (with `?sslmode=require`). Use the current, rotated password. `.env` and `.env.local` are ignored by Git; never commit credentials. There is no database credential fallback in source code.
 3. Set `BETTER_AUTH_SECRET` (at least 32 random characters) and `SITE_URL` / `TRUSTED_ORIGINS`.
 4. Tables and schemas are automatically created and initialized on server startup via `initDb()` in `lib/db.ts`.
 5. Run `npm run dev`. Guests authenticate automatically and retain their session in the browser's secure session cookie. Clearing cookies loses guest access; linked accounts can recover across devices.
@@ -21,7 +21,15 @@ The public `/leaderboard` page and home page show up to ten signed-in accounts o
 
 ## Deploy
 
-Configure `DATABASE_URL` and `BETTER_AUTH_SECRET` in your hosting environment (e.g. Vercel Project Settings), then deploy with `git push` or `npx vercel deploy --prod`. Never expose database credentials or auth secrets as public variables.
+Set `DATABASE_URL` and `BETTER_AUTH_SECRET` in Vercel Project Settings → Environment Variables. Store production and preview credentials as Sensitive secrets, scoped to the environments that need them. Use a separate database for preview/development when possible. Never prefix database credentials or auth secrets with `NEXT_PUBLIC_`.
+
+To enter a production secret from the CLI without putting its value in a command or source file, run:
+
+```sh
+vercel env add DATABASE_URL production --sensitive --project tic-tac-toe-royale
+```
+
+Use `--force` when replacing an existing value. Repeat for preview with its own connection string. Set a development value for local use, or enter it directly in the ignored `.env.local`. Updating an environment variable requires a new deployment to take effect. Deploy the code and updated secrets together with `git push` or `npx vercel deploy --prod`.
 
 ## Rules and lifecycle
 
