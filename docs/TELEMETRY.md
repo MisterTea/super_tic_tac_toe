@@ -1,6 +1,6 @@
 # Royale telemetry
 
-Game mutations write telemetry facts and UTC daily/all-time rollups in the same Convex transaction as the operation. Stable profile, match, tournament, reward, and event IDs make retries and historical backfills idempotent. No client can submit counters, award crowns, or read player-level telemetry.
+Game mutations write telemetry facts and UTC daily/all-time rollups in the same PostgreSQL transaction as the operation. Stable profile, match, tournament, reward, and event IDs make retries idempotent. No client can submit arbitrary counters, award crowns, or read player-level telemetry.
 
 The public `telemetry:publicStats` query returns only `{ players, games, crowns }`. The header on `/` and `/practice` randomly selects one on page load and refreshes its total every minute.
 
@@ -10,20 +10,12 @@ The public `telemetry:publicStats` query returns only `{ players, games, crowns 
 - **Activity:** distinct active profiles per UTC day, recorded on authenticated visits, joins, moves, and resignations. The all-time activity sum is player-days, not all-time unique players.
 - **Funnel/quality:** lobby joins/leaves/cancellations, tournaments started/completed, human and CPU entries, immediate requeues, return visits, queue and spectator wait averages, match duration, clock forfeits, resignations, match caps, legal moves in completed matches, XP awarded, and scheduler recovery attempts.
 
-Read the private admin report in the Convex dashboard's Functions view (`telemetry:report`), or from this linked repository:
-
-```powershell
-npx convex run --prod telemetry:report '{"days":30}'
-```
-
-It returns lifetime totals and the most recent 30 daily buckets (maximum 90). Missing counters are zero; averages with no samples are null. Gameplay can continue without a browser open, so CPU and completion metrics continue updating on the server.
-
-After deployment, run `npx convex run --prod telemetry:backfill` once. It processes ten source documents per scheduled transaction and safely resumes through profiles, tournaments, rewards, and events. Re-running applies no duplicate counts. Historical active days are limited to known creation/last-visit days; intervening days before telemetry installation cannot be reconstructed. Keep test and production deployments separate.
+Read the private admin report via `telemetry:report`. It returns lifetime totals and the most recent 30 daily buckets (maximum 90). Missing counters are zero; averages with no samples are null. Gameplay can continue without a browser open, so CPU and completion metrics continue updating on the server.
 
 ## OAuth
 
 Sign in with Vercel uses Better Auth's built-in Vercel provider and PKCE, with identity-only `email`/`profile` scopes. The OAuth app is `tic-tac-toe-royale-aquinas`. Its production callbacks follow the linked Vercel project at `/api/auth/callback/vercel`; development permits `http://localhost:3000/api/auth/callback/vercel`.
 
-Set `VERCEL_CLIENT_ID` and `VERCEL_CLIENT_SECRET` on each Convex deployment, never as public frontend variables. Guest progress links into the signed-in account through the existing server-side merge. Sign-in and sign-out are blocked during tournament participation. Optional Google credentials remain supported by the backend.
+Set `VERCEL_CLIENT_ID` and `VERCEL_CLIENT_SECRET` in environment variables, never as public frontend variables. Guest progress links into the signed-in account through the existing server-side merge. Sign-in and sign-out are blocked during tournament participation. Optional Google credentials remain supported by the backend.
 
 Growth metrics include firstMatchesCompleted (first settled match per profile), firstMatchesPlayedThrough (excluding clock loss or resignation), with campaign-level counts in the private growth:report function and campaignMetrics table. These counters were introduced with the growth update and don't retroactively reconstruct historical acquisition sources. Campaign labels are browser supplied, sanitized, and bounded; they are not trusted gameplay data.

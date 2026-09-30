@@ -1,11 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../convex/_generated/api";
+import { ConvexHttpClient, api } from "../lib/neon-client";
 
 type Stats = { players: number; games: number; crowns: number };
-const url = process.env.NEXT_PUBLIC_CONVEX_URL;
-const client = url ? new ConvexHttpClient(url) : undefined;
+const client = new ConvexHttpClient();
 
 export default function StatHeader() {
   const [stats, setStats] = useState<Stats>();
@@ -15,7 +13,7 @@ export default function StatHeader() {
     let live = true;
     const refresh = () =>
       client
-        ?.query(api.telemetry.publicStats, {})
+        .query(api.telemetry.publicStats, {})
         .then((data) => {
           if (live) setStats(data);
         })

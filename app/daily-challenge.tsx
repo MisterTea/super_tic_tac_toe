@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { useQuery, useMutation, api } from "../lib/neon-client";
 import Board from "./royale/board";
 import ShareLink from "./share-link";
 export default function DailyChallenge() {

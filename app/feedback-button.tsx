@@ -1,10 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
-import { ConvexHttpClient } from "convex/browser";
-import { ConvexError } from "convex/values";
-import { api } from "../convex/_generated/api";
+import { ConvexHttpClient, ConvexError, api } from "../lib/neon-client";
 
-const url = process.env.NEXT_PUBLIC_CONVEX_URL;
 let client: ConvexHttpClient | undefined;
 export default function FeedbackButton() {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -18,7 +15,7 @@ export default function FeedbackButton() {
   const [error, setError] = useState("");
   async function send(event: React.FormEvent) {
     event.preventDefault();
-    if (!url || pending) return;
+    if (pending) return;
     setPending(true);
     setError("");
     try {
@@ -31,7 +28,7 @@ export default function FeedbackButton() {
         /* Feedback also works without storage. */
       }
       request.current ||= crypto.randomUUID();
-      client ||= new ConvexHttpClient(url);
+      client ||= new ConvexHttpClient();
       await client.mutation(api.feedback.send, {
         message,
         email,
@@ -150,11 +147,10 @@ export default function FeedbackButton() {
             <button
               className="primary"
               type="submit"
-              disabled={pending || !url}
+              disabled={pending}
             >
               {pending ? "Sending…" : "Send feedback"}
             </button>
-            {!url ? <p>Feedback is being connected.</p> : null}
           </form>
         )}
       </dialog>

@@ -1,13 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
-import { api } from "../convex/_generated/api";
+import { ConvexHttpClient, api } from "../lib/neon-client";
 
 test("public totals appear on Royale and practice without exposing private telemetry", async ({
   page,
 }, testInfo) => {
-  test.skip(!process.env.NEXT_PUBLIC_CONVEX_URL, "Requires configured Convex");
-  const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  test.skip(!process.env.DATABASE_URL, "Requires configured Neon database");
+  const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
   for (const route of ["/", "/practice"]) {
     const before = await client.query(api.telemetry.publicStats, {});
     await page.goto(route);
@@ -30,6 +28,6 @@ test("public totals appear on Royale and practice without exposing private telem
       await page.screenshot({ path: testInfo.outputPath("stat-header.jpg") });
   }
   await expect(
-    client.query(makeFunctionReference<"query">("telemetry:report"), {}),
-  ).rejects.toThrow(/Server Error|public function|internal/i);
+    client.query("telemetry:report", {}),
+  ).rejects.toThrow(/Server Error|public function|internal|unknown function/i);
 });

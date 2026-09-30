@@ -6,12 +6,10 @@ import {
   useConvexAuth,
   useMutation,
   useQuery,
-} from "convex/react";
-import {
   ConvexBetterAuthProvider,
-  type AuthClient,
-} from "@convex-dev/better-auth/react";
-import { api } from "../../convex/_generated/api";
+  ConvexError,
+  api,
+} from "../../lib/neon-client";
 import { authClient } from "../../lib/auth-client";
 import {
   cosmetics,
@@ -29,12 +27,10 @@ import FeedbackButton from "../feedback-button";
 import ShareLink from "../share-link";
 import ResultShare from "../result-share";
 import DailyChallenge from "../daily-challenge";
-import { ConvexError } from "convex/values";
 
-const url = process.env.NEXT_PUBLIC_CONVEX_URL;
 let convexClient: ConvexReactClient | undefined;
 let guestSignIn: Promise<unknown> | undefined;
-const getClient = () => (convexClient ||= new ConvexReactClient(url!));
+const getClient = () => (convexClient ||= new ConvexReactClient());
 class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -125,12 +121,6 @@ function Leaderboard() {
   );
 }
 export function LeaderboardPage() {
-  if (!url)
-    return (
-      <Shell>
-        <p>Leaderboard is being connected.</p>
-      </Shell>
-    );
   return (
     <ConvexProvider client={getClient()}>
       <Shell>
@@ -227,31 +217,11 @@ export default function Royale({
   account?: boolean;
   daily?: boolean;
 }) {
-  if (!url)
-    return (
-      <Shell>
-        <section className="intro">
-          <div className="eyebrow">THE NEXT CHALLENGE</div>
-          <h1>
-            One bracket.
-            <br />
-            <span>One champion.</span>
-          </h1>
-          <p>
-            Royale matchmaking is being connected. Practice your game while the
-            arena gets ready.
-          </p>
-        </section>
-        <SingleGames />
-      </Shell>
-    );
-  // The adapter's broad plugin union infers `never` sessions with Better Auth
-  // 1.6.33. The concrete client supplies the same supported session/token API.
   return (
     <Boundary>
       <ConvexBetterAuthProvider
         client={getClient()}
-        authClient={authClient as unknown as AuthClient}
+        authClient={authClient as any}
       >
         <Session account={account} daily={daily} />
       </ConvexBetterAuthProvider>

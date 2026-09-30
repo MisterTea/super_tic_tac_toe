@@ -1,11 +1,19 @@
 import { cache } from "react";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../convex/_generated/api";
-export const loadSharedResult = cache(async (token: string) => {
-  const url = process.env.NEXT_PUBLIC_CONVEX_URL;
-  if (!url) return null;
-  return new ConvexHttpClient(url).query(api.growth.sharedResult, { token });
+import { sharedResult } from "./backend/growth";
+
+export type SharedResultData = {
+  name: string;
+  finish: number;
+  wins: number;
+  crown: boolean;
+  delta: number;
+  rounds: Array<{ round: number; won: boolean }>;
+};
+
+export const loadSharedResult = cache(async (token: string): Promise<SharedResultData | null> => {
+  return (await sharedResult(token)) as SharedResultData | null;
 });
+
 export const resultTitle = (r: { crown: boolean; finish: number }) =>
   r.crown
     ? "Victory Royale"

@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../convex/_generated/api";
+import { ConvexHttpClient, api } from "../lib/neon-client";
 
 test("public leaderboard matches the top ten without exposing private profile fields", async ({
   page,
 }, testInfo) => {
-  test.skip(!process.env.NEXT_PUBLIC_CONVEX_URL, "Requires configured Convex");
-  const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  test.skip(!process.env.DATABASE_URL, "Requires configured Neon database");
+  const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
   await page.goto("/leaderboard");
   await expect(
     page.getByRole("heading", { name: "Top 10 players", exact: true }),

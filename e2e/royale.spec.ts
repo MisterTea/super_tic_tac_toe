@@ -4,7 +4,7 @@ test("Royale has a useful setup state without backend configuration", async ({
   page,
 }) => {
   test.skip(
-    !!process.env.NEXT_PUBLIC_CONVEX_URL,
+    !!process.env.DATABASE_URL,
     "This scenario applies only before backend setup",
   );
   await page.goto("/");
@@ -20,8 +20,8 @@ test("guest lobby warms up, fills with CPUs, starts, and restores after refresh"
   page,
 }, testInfo) => {
   test.skip(
-    !process.env.NEXT_PUBLIC_CONVEX_URL,
-    "Requires a configured development Convex deployment",
+    !process.env.DATABASE_URL,
+    "Requires a configured Neon database",
   );
   test.setTimeout(90_000);
   const errors: string[] = [];

@@ -1,14 +1,12 @@
 "use client";
-import { useMutation } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { useMutation, api } from "../lib/neon-client";
 import { useState } from "react";
-import type { Id } from "../convex/_generated/dataModel";
 import ShareLink from "./share-link";
 export default function ResultShare({
   tournament,
   crown,
 }: {
-  tournament: Id<"tournaments">;
+  tournament: string;
   crown: boolean;
 }) {
   const create = useMutation(api.growth.shareResult);
