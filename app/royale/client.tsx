@@ -13,6 +13,7 @@ import {
 import { authClient } from "../../lib/auth-client";
 import {
   cosmetics,
+  DEFAULT_SETTINGS,
   levelFor,
   roundNames,
   tierIndex,
@@ -547,6 +548,10 @@ function Arena({ guest }: { guest: boolean }) {
       sounds.current?.close();
     };
   }, []);
+  const [optimistic, setOptimistic] = useState<{
+    tournament: string;
+    match: PublicTournament["matches"][number];
+  } | null>(null);
   const t = data?.tournament;
   const phase = data?.view?.phase;
   const showResultsWatch =
@@ -554,8 +559,18 @@ function Arena({ guest }: { guest: boolean }) {
   const matchId = showResultsWatch
     ? (selectedMatch ?? t?.matches.find((m) => m.status === "playing")?.id)
     : data?.view?.matchId;
-  const match =
+  const confirmedMatch =
     matchId === undefined || matchId === null ? undefined : t?.matches[matchId];
+  const showOptimistic =
+    !!optimistic &&
+    optimistic.tournament === t?.id &&
+    optimistic?.match.id === confirmedMatch?.id &&
+    !!confirmedMatch &&
+    optimistic.match.state.moves.length > confirmedMatch.state.moves.length;
+  const match = showOptimistic ? optimistic!.match : confirmedMatch;
+  useEffect(() => {
+    if (optimistic && !showOptimistic) setOptimistic(null);
+  }, [optimistic, showOptimistic]);
   useEffect(() => {
     if (!match) return;
     const key = `${t?.id}:${match.id}:${match.state.moves.length}`;
@@ -745,8 +760,8 @@ function Arena({ guest }: { guest: boolean }) {
               {pending ? "Joining…" : "Play Royale →"}
             </button>
             <p className="fine-print">
-              {tier} matchmaking · Brackets start after 30 seconds · 75-second
-              thinking clocks
+              {tier} matchmaking · Brackets start after 30 seconds · 15 seconds
+              per move
             </p>
             <div className="growth-options">
               <button
@@ -983,12 +998,31 @@ function Arena({ guest }: { guest: boolean }) {
                   enabled={canPlay}
                   onMove={(action) =>
                     void act(async () => {
-                      await move({
+                      const next = play(match.state, action);
+                      const clocks = [...match.clocks] as [number, number];
+                      clocks[next.turn === 1 ? 0 : 1] = (
+                        t.settings || DEFAULT_SETTINGS
+                      ).clockMs;
+                      setOptimistic({
                         tournament: t.id!,
-                        match: match.id,
-                        seq: match.state.moves.length,
-                        action,
+                        match: { ...match, state: next, clocks, turnAt: now },
                       });
+                      try {
+                        const accepted = await move({
+                          tournament: t.id!,
+                          match: match.id,
+                          seq: match.state.moves.length,
+                          action,
+                        });
+                        clockOffset.current = accepted.serverNow - Date.now();
+                        setOptimistic({
+                          tournament: t.id!,
+                          match: accepted.match,
+                        });
+                      } catch (e) {
+                        setOptimistic(null);
+                        throw e;
+                      }
                     })
                   }
                 />
@@ -1053,7 +1087,7 @@ function Arena({ guest }: { guest: boolean }) {
           crown.
         </p>
         <p>
-          Each player has 75 seconds of total thinking time. Running out loses
+          Each move starts a fresh 15-second thinking clock. Running out loses
           the match. Tied small boards become wildcards for either player. If
           both players complete a line, the player who made the wildcard wins.
           Finished boards and the three-minute match limit use most claimed

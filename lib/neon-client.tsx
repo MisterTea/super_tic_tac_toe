@@ -1,5 +1,12 @@
 "use client";
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+} from "react";
 import { authClient } from "./auth-client";
 
 export class ConvexError extends Error {
@@ -92,9 +99,11 @@ export class ConvexReactClient extends ConvexHttpClient {}
 export function useMutation(fnName: string) {
   return useCallback(
     async (args: any = {}) => {
-      const result = await callRpc(fnName, args);
-      notifyQueryListeners();
-      return result;
+      try {
+        return await callRpc(fnName, args);
+      } finally {
+        notifyQueryListeners();
+      }
     },
     [fnName],
   );
@@ -180,61 +189,75 @@ export function useQuery<K extends keyof QueryTypeMap>(
   fnName: K,
   args?: any,
 ): QueryTypeMap[K] | undefined;
-export function useQuery<T = any>(
-  fnName: string,
-  args?: any,
-): T | undefined;
+export function useQuery<T = any>(fnName: string, args?: any): T | undefined;
 export function useQuery(fnName: string, args: any = {}) {
   const isSkip = args === "skip";
   const [data, setData] = useState<any>(undefined);
   const argsJson = JSON.stringify(args);
 
-  const fetchCurrent = useCallback(async () => {
-    if (isSkip) return;
-    try {
-      const parsedArgs = argsJson ? JSON.parse(argsJson) : {};
-      const result = await callRpc(fnName, parsedArgs);
-      setData(result);
-    } catch {
-      // Keep previous data on transient poll error
-    }
-  }, [fnName, argsJson, isSkip]);
-
   useEffect(() => {
     if (isSkip) return;
-    void fetchCurrent();
-
+    let alive = true;
+    let inFlight = false;
+    let invalidation = 0;
+    let refreshRequested = false;
+    const fetchCurrent = async () => {
+      if (!alive || inFlight) return;
+      inFlight = true;
+      const started = invalidation;
+      try {
+        const result = await callRpc(
+          fnName,
+          argsJson ? JSON.parse(argsJson) : {},
+        );
+        if (alive && started === invalidation) {
+          setData((current: any) => {
+            if (
+              fnName === "royale.dashboard" &&
+              current?.tournament?.id === result?.tournament?.id &&
+              current?.tournament?.version > result?.tournament?.version
+            )
+              return current;
+            return result;
+          });
+        }
+      } catch {
+        // Preserve the last confirmed state during transient network failures.
+      } finally {
+        inFlight = false;
+        if (alive && refreshRequested) {
+          refreshRequested = false;
+          void fetchCurrent();
+        }
+      }
+    };
     const onInvalidate = () => {
+      invalidation++;
+      refreshRequested = inFlight;
       void fetchCurrent();
     };
+    void fetchCurrent();
     queryListeners.add(onInvalidate);
-
-    let intervalMs = 10000;
-    if (fnName === "royale.dashboard") {
-      intervalMs = 400;
-    } else if (fnName === "growth.room") {
-      intervalMs = 800;
-    } else if (fnName === "daily.today") {
-      intervalMs = 15000;
-    }
-
-    const timer = setInterval(() => {
-      void fetchCurrent();
-    }, intervalMs);
-
-    const onFocus = () => {
-      void fetchCurrent();
-    };
+    const intervalMs =
+      fnName === "royale.dashboard"
+        ? 400
+        : fnName === "growth.room"
+          ? 800
+          : fnName === "daily.today"
+            ? 15000
+            : 10000;
+    const timer = setInterval(() => void fetchCurrent(), intervalMs);
+    const onFocus = () => void fetchCurrent();
     window.addEventListener("focus", onFocus);
     window.addEventListener("visibilitychange", onFocus);
-
     return () => {
+      alive = false;
       queryListeners.delete(onInvalidate);
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("visibilitychange", onFocus);
     };
-  }, [fnName, argsJson, isSkip, fetchCurrent]);
+  }, [fnName, argsJson, isSkip]);
 
   return isSkip ? undefined : data;
 }

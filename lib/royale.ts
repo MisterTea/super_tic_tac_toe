@@ -3,9 +3,9 @@ import { initial, legal, lines, play, scoreWinner, type State } from "./game";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 export const LOBBY_MS = 30_000;
-export const CLOCK_MS = 75_000;
+export const CLOCK_MS = 15_000;
 export const MATCH_MS = 180_000;
 export const COUNTDOWN_MS = 10_000;
 export const BOT_DELAY_MS = 2_000;
@@ -254,9 +254,9 @@ export function advanceTime(t: Tournament, now: number) {
   for (const m of t.matches) {
     if (m.status === "countdown" && now >= m.startAt) {
       m.status = "playing";
-      m.turnAt = m.startAt;
-      m.deadline = m.startAt + (t.settings || DEFAULT_SETTINGS).matchMs;
-      m.botAt = m.startAt + (t.settings || DEFAULT_SETTINGS).botDelayMs;
+      m.turnAt = now;
+      m.deadline = now + (t.settings || DEFAULT_SETTINGS).matchMs;
+      m.botAt = now + (t.settings || DEFAULT_SETTINGS).botDelayMs;
       m.version++;
       t.version++;
     }
@@ -316,6 +316,7 @@ export function submitMove(
     m.state.boards.filter((b) => b === m.state.turn).length;
   m.clocks[seat] -= Math.max(0, now - m.turnAt);
   m.state = next;
+  m.clocks[next.turn === 1 ? 0 : 1] = (t.settings || DEFAULT_SETTINGS).clockMs;
   m.turnAt = now;
   m.botAt = now + (t.settings || DEFAULT_SETTINGS).botDelayMs;
   m.version++;

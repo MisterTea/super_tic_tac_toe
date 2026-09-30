@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { query } from "../lib/db";
-import { startTournament, type Tournament } from "../lib/royale";
+import { CLOCK_MS, startTournament, type Tournament } from "../lib/royale";
 
 test("X and O alternate legal Royale moves, reject out-of-turn moves, and restore after refresh", async ({
   page,
@@ -69,6 +69,36 @@ test("X and O alternate legal Royale moves, reject out-of-turn moves, and restor
     const players = first.tournament.matches[matchId].players;
     const x = players[0] === first.profile._id ? page : friend;
     const o = x === page ? friend : page;
+    await expect(
+      x.getByRole("heading", { name: "Your turn.", exact: true }),
+    ).toBeVisible({ timeout: 20_000 });
+    let releaseOldPoll!: () => void;
+    let capturedOldPoll!: () => void;
+    const oldPollCaptured = new Promise<void>((resolve) => {
+      capturedOldPoll = resolve;
+    });
+    const releasePoll = new Promise<void>((resolve) => {
+      releaseOldPoll = resolve;
+    });
+    let holdPoll = true;
+    let moveResponseDelivered = false;
+    await x.route("**/api/rpc", async (route) => {
+      const name = route.request().postDataJSON()?.name;
+      if (name === "royale.dashboard" && holdPoll) {
+        holdPoll = false;
+        const response = await route.fetch();
+        capturedOldPoll();
+        await releasePoll;
+        await route.fulfill({ response });
+      } else if (name === "royale.move") {
+        const response = await route.fetch();
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        moveResponseDelivered = true;
+        await route.fulfill({ response });
+      } else await route.continue();
+    });
+    await oldPollCaptured;
+    let previousTurnAt = 0;
     for (let seq = 0; seq < 6; seq++) {
       const active = seq % 2 === 0 ? x : o;
       const inactive = active === x ? o : x;
@@ -101,7 +131,14 @@ test("X and O alternate legal Royale moves, reject out-of-turn moves, and restor
           r.request().postDataJSON()?.name === "royale.move",
       );
       await button.click();
+      if (seq === 0) {
+        await expect(
+          active.getByRole("button", { name: `${label}, X`, exact: true }),
+        ).toBeVisible({ timeout: 500 });
+        expect(moveResponseDelivered).toBe(false);
+      }
       expect((await responsePromise).status()).toBe(200);
+      if (seq === 0) releaseOldPoll();
       for (const player of [active, inactive]) {
         await expect(
           player.getByRole("button", {
@@ -112,6 +149,12 @@ test("X and O alternate legal Royale moves, reject out-of-turn moves, and restor
         await expect(player.locator(".royale-error")).toHaveCount(0);
       }
       const saved = await dashboard(active);
+      const savedMatch = saved.tournament.matches[matchId];
+      expect(savedMatch.clocks[savedMatch.state.turn === 1 ? 0 : 1]).toBe(
+        CLOCK_MS,
+      );
+      expect(savedMatch.turnAt).toBeGreaterThan(previousTurnAt);
+      previousTurnAt = savedMatch.turnAt;
       expect(saved.tournament.matches[matchId].state.moves).toHaveLength(
         seq + 1,
       );
@@ -228,8 +271,14 @@ test("guest lobby warms up, fills with CPUs, starts, and restores after refresh"
   const playedMove = page.getByRole("button", {
     name: new RegExp(`^${moveLabel}, [XO]$`),
   });
+  const moveResponse = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/rpc") &&
+      r.request().postDataJSON()?.name === "royale.move",
+  );
   await moveButton.click();
   await expect(playedMove).toBeVisible();
+  expect((await moveResponse).status()).toBe(200);
   const identity = await page.locator(".profile-chip").innerText();
   await page.reload();
   await expect(page.locator(".profile-chip")).toHaveText(identity);

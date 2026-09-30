@@ -112,6 +112,34 @@ test("server clocks reject late, stale, illegal and spectator moves", () => {
   assert.equal(m.winner, m.players[0]);
   assert.equal(m.reason, "clock");
 });
+test("an overdue countdown starts a full first turn instead of expiring it", () => {
+  const t = field(),
+    m = t.matches[0];
+  m.status = "countdown";
+  advanceTime(t, 60_000);
+  assert.equal(m.status, "playing");
+  assert.equal(m.turnAt, 60_000);
+  assert.equal(m.clocks[0], CLOCK_MS);
+  assert.equal(m.deadline, 60_000 + 180_000);
+});
+test("every new turn receives a fresh thinking clock", () => {
+  const t = field(),
+    m = t.matches[0];
+  submitMove(t, m.id, m.players[0], 0, 40, 20_000);
+  assert.equal(m.turnAt, 20_000);
+  assert.equal(m.clocks[1], CLOCK_MS);
+  submitMove(t, m.id, m.players[1], 1, 36, 30_000);
+  assert.equal(m.turnAt, 30_000);
+  assert.equal(m.clocks[0], CLOCK_MS);
+  submitMove(t, m.id, m.players[0], 2, 0, 40_000);
+  assert.equal(m.turnAt, 40_000);
+  assert.equal(m.clocks[1], CLOCK_MS);
+  advanceTime(t, 40_000 + CLOCK_MS - 1);
+  assert.equal(m.status, "playing");
+  advanceTime(t, 40_000 + CLOCK_MS);
+  assert.equal(m.winner, m.players[0]);
+});
+
 test("board-score tiebreak prefers large pieces; secret is not public", () => {
   const t = field(),
     m = t.matches[0];

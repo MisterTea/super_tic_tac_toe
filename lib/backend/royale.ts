@@ -248,61 +248,58 @@ export function scheduleBotDrive(id: string, version: number, delayMs: number) {
   if (existing) clearTimeout(existing);
   const timer = setTimeout(() => {
     wakeTimers.delete(id);
-    void driveBots(id, version);
+    void driveBots(id, version).catch(() => {
+      scheduleBotDrive(id, version, 1000);
+    });
   }, Math.min(delayMs, 2147483647));
   wakeTimers.set(id, timer);
 }
 
-export async function driveBots(tournamentId: string, version: number) {
+const botDrives = new Map<string, Promise<void>>();
+
+export async function driveBots(tournamentId: string, _version: number) {
+  const running = botDrives.get(tournamentId);
+  if (running) return running;
+  const work = runBotDrive(tournamentId);
+  botDrives.set(tournamentId, work);
+  try {
+    await work;
+  } finally {
+    botDrives.delete(tournamentId);
+  }
+}
+
+async function runBotDrive(tournamentId: string) {
+  const snapshot = (await query("SELECT state FROM tournaments WHERE id = $1", [tournamentId])).rows[0]?.state as Tournament | undefined;
+  if (!snapshot) return;
+  const computedAt = Date.now();
+  advanceTime(snapshot, computedAt);
+  // Compute moves before taking the write lock shared with human moves.
+  const moves = snapshot.matches.flatMap((m) => {
+    const player = m.players[m.state.turn === 1 ? 0 : 1];
+    const entrant = snapshot.entrants.find(e => e.id === player);
+    if (m.status !== "playing" || m.botAt > computedAt || !entrant?.cpu) return [];
+    return [{ match: m.id, seq: m.state.moves.length, player,
+      action: skillMove(m.state, entrant.skill, model as SkillModel, seeded(snapshot.seed + m.id * 1000 + m.version)) }];
+  });
   await withTransaction(async (client) => {
-    const rowRes = await client.query(
-      "SELECT * FROM tournaments WHERE id = $1 FOR UPDATE",
-      [tournamentId],
-    );
-    const row = rowRes.rows[0];
+    const row = (await client.query("SELECT * FROM tournaments WHERE id = $1 FOR UPDATE", [tournamentId])).rows[0];
     if (!row) return;
     const t = row.state as Tournament;
-    if (t.version !== version) return;
+    const before = t.version;
     const now = Date.now();
     advanceTime(t, now);
-
-    const moves: { match: number; seq: number; action: number }[] = [];
-    for (const m of t.matches) {
-      if (m.status !== "playing" || m.botAt > now) continue;
-      const entrant = t.entrants.find(
-        (e) => e.id === m.players[m.state.turn === 1 ? 0 : 1],
-      );
-      if (entrant?.cpu) {
-        moves.push({
-          match: m.id,
-          seq: m.state.moves.length,
-          action: skillMove(
-            m.state,
-            entrant.skill,
-            model as SkillModel,
-            seeded(t.seed + m.id * 1000 + m.version),
-          ),
-        });
-      }
-    }
-
     for (const move of moves) {
       const m = t.matches[move.match];
-      if (
-        !m ||
-        m.status !== "playing" ||
-        m.state.moves.length !== move.seq ||
-        m.botAt > now
-      )
-        continue;
-      const player = m.players[m.state.turn === 1 ? 0 : 1];
-      if (t.entrants.find((e) => e.id === player)?.cpu) {
-        submitMove(t, m.id, player, move.seq, move.action, now);
-      }
+      if (!m || m.status !== "playing" || m.state.moves.length !== move.seq ||
+          m.players[m.state.turn === 1 ? 0 : 1] !== move.player || m.botAt > now) continue;
+      submitMove(t, m.id, move.player, move.seq, move.action, now);
     }
-
-    t.version++;
-    await save(client, tournamentId, t, now);
+    if (t.version !== before) await save(client, tournamentId, t, now);
+    else {
+      const wake = nextWake(t, now);
+      if (wake !== null) scheduleBotDrive(tournamentId, t.version, Math.max(20, wake - now));
+    }
   });
 }
 
@@ -405,19 +402,22 @@ export async function dashboard(authId: string) {
     const res = await query("SELECT * FROM tournaments WHERE id = $1", [tournamentId]);
     tournamentRow = res.rows[0];
   }
-  const t = tournamentRow?.state as Tournament | undefined;
-
-  // If match or bots need driving, drive if botAt has passed
-  if (t && t.status === "active") {
+  let t = tournamentRow?.state as Tournament | undefined;
+  // Requests also drive overdue transitions; process timers may disappear
+  // between requests on a serverless host.
+  if (t && (t.status === "lobby" || t.status === "active")) {
     const now = Date.now();
-    const needsDrive = t.matches.some(
-      (m) =>
-        m.status === "playing" &&
-        m.botAt <= now &&
-        t.entrants.find((e) => e.id === m.players[m.state.turn === 1 ? 0 : 1])?.cpu,
-    );
-    if (needsDrive) {
-      void driveBots(tournamentId!, t.version);
+    const overdue = t.status === "lobby" ? now >= t.closesAt : t.matches.some(m => {
+      if (m.status === "countdown") return now >= m.startAt;
+      if (m.status !== "playing") return false;
+      const seat = m.state.turn === 1 ? 0 : 1;
+      return now >= Math.min(m.deadline, m.turnAt + m.clocks[seat]) ||
+        (m.botAt <= now && t!.entrants.find(e => e.id === m.players[seat])?.cpu);
+    });
+    if (overdue) {
+      await driveBots(tournamentId!, t.version);
+      tournamentRow = (await query("SELECT * FROM tournaments WHERE id = $1", [tournamentId])).rows[0];
+      t = tournamentRow?.state as Tournament | undefined;
     }
   }
 
@@ -677,6 +677,7 @@ export async function move(
     }
     submitMove(t, m.id, p.id, seq, action, now);
     await save(client, row.id, t, now);
+    return { match: publicTournament(t).matches[m.id], serverNow: Date.now() };
   });
 }
 
