@@ -38,10 +38,11 @@ export default function StatHeader() {
     <a
       className="brand"
       href="/"
-      aria-label={`${text} — Tic Tac Toe Royale home`}
+      aria-label={`Super Tic Tac Toe Royale home — ${text}`}
       title="Lifetime Royale totals"
     >
-      ◎ {text}
+      <span>Super Tic Tac Toe Royale</span>
+      <span className="brand-stats">◎ {text}</span>
     </a>
   );
 }

@@ -40,11 +40,19 @@ header {
   padding-bottom: 26px;
 }
 .brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   color: var(--lime);
   font-family: "Space Grotesk", sans-serif;
   text-decoration: none;
   font-weight: 600;
   letter-spacing: 2px;
+}
+.brand-stats {
+  font-size: 11px;
+  letter-spacing: 1px;
+  opacity: 0.75;
 }
 .badge {
   font-size: 10px;
