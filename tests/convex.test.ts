@@ -637,3 +637,145 @@ describe("private player feedback", () => {
     ).rejects.toThrow("wait an hour");
   });
 });
+
+describe("growth features", () => {
+  it("isolates friend rooms, authorizes the host, transfers hosting, and fills the bracket", async () => {
+    const t = backend(),
+      a = await player(t, "RoomHost"),
+      b = await player(t, "RoomFriend"),
+      c = await player(t, "RankedPlayer");
+    const code = await a.client.mutation(api.growth.host, {});
+    expect(code).toMatch(/^[a-z2-9]{10}$/);
+    const friendId = await b.client.mutation(api.royale.join, {
+      roomCode: code,
+    });
+    const publicId = await c.client.mutation(api.royale.join, {});
+    expect(publicId).not.toBe(friendId);
+    expect(
+      (await b.client.query(api.royale.dashboard, {})).tournament?.entrants,
+    ).toHaveLength(2);
+    await expect(b.client.mutation(api.growth.start, {})).rejects.toThrow(
+      "Only the lobby host",
+    );
+    await a.client.mutation(api.royale.leaveLobby, {});
+    expect((await b.client.query(api.royale.dashboard, {})).isHost).toBe(true);
+    await b.client.mutation(api.growth.start, {});
+    const data = await b.client.query(api.royale.dashboard, {});
+    expect(data.tournament?.entrants).toHaveLength(16);
+    expect(
+      (await t.run((ctx) => ctx.db.get(friendId)))?.state.settings.rankDeltas,
+    ).toEqual([0, 0, 0, 0, 0]);
+    await expect(
+      a.client.mutation(api.royale.join, { roomCode: code }),
+    ).rejects.toThrow("already started");
+  });
+  it("saves first-touch attribution once and counts conversions at join", async () => {
+    const t = backend(),
+      a = await player(t, "Referral");
+    await a.client.mutation(api.growth.attribute, {
+      source: "YouTube",
+      campaign: "creator_one",
+    });
+    await a.client.mutation(api.growth.attribute, {
+      source: "direct",
+      campaign: "none",
+    });
+    expect(
+      (await a.client.query(api.royale.dashboard, {})).profile.acquisition
+        ?.source,
+    ).toBe("youtube");
+    await a.client.mutation(api.royale.join, {});
+    const report = await t.query(internal.growth.report, {});
+    expect(report.campaigns.find((c) => c.source === "youtube")).toMatchObject({
+      campaign: "creator_one",
+      visitors: 1,
+      entries: 1,
+    });
+  });
+  it("checks every daily position and persists guesses without awarding rank or crowns", async () => {
+    const { dailyPosition, utcDay } = await import("../lib/daily");
+    const { legal, play } = await import("../lib/game");
+    for (let i = 0; i < 64; i++) {
+      const state = dailyPosition(utcDay(Date.now() + i * 86400_000));
+      expect(
+        legal(state).filter((a) => play(state, a).winner === state.turn),
+      ).toHaveLength(1);
+    }
+    const t = backend(),
+      a = await player(t, "DailyPlayer");
+    const today = await a.client.query(api.daily.today, {});
+    expect(today.solution).toBeUndefined();
+    const solution = legal(today.state).find(
+      (a) => play(today.state, a).winner === today.state.turn,
+    )!;
+    const wrong = legal(today.state).find((a) => a !== solution)!;
+    await a.client.mutation(api.daily.attempt, {
+      day: today.day,
+      action: wrong,
+    });
+    await expect(
+      a.client.mutation(api.daily.attempt, { day: today.day, action: wrong }),
+    ).rejects.toThrow("already tried");
+    await expect(
+      a.client.mutation(api.daily.attempt, {
+        day: "2000-01-01",
+        action: solution,
+      }),
+    ).rejects.toThrow("new daily");
+    await a.client.mutation(api.daily.attempt, {
+      day: today.day,
+      action: solution,
+    });
+    await a.client.mutation(api.daily.attempt, {
+      day: today.day,
+      action: solution,
+    });
+    const done = await a.client.query(api.daily.today, {});
+    expect(done).toMatchObject({ solved: true, done: true, solution });
+    expect(done.attempts).toHaveLength(2);
+    const p = (await a.client.query(api.royale.dashboard, {})).profile;
+    expect([p.xp, p.crowns, p.points]).toEqual([0, 0, 0]);
+  });
+  it("publishes only an authorized result snapshot and deduplicates share cards", async () => {
+    const t = backend(),
+      a = await player(t, "Sharer"),
+      b = await player(t, "OtherSharer");
+    const id = await a.client.mutation(api.royale.join, {});
+    await expect(
+      b.client.mutation(api.growth.shareResult, { tournament: id }),
+    ).rejects.toThrow("isn't ready");
+    await t.run(async (ctx) => {
+      const row = (await ctx.db.get(id))!;
+      const state = row.state as Tournament;
+      state.entrants[0].finish = 0;
+      await ctx.db.patch(id, { state });
+      await ctx.db.insert("rewards", {
+        profile: a.id,
+        tournament: id,
+        finish: 0,
+        delta: 0,
+        xp: 0,
+        crown: false,
+        createdAt: Date.now(),
+      });
+    });
+    const token = await a.client.mutation(api.growth.shareResult, {
+      tournament: id,
+    });
+    expect(
+      await a.client.mutation(api.growth.shareResult, { tournament: id }),
+    ).toBe(token);
+    const result = await t.query(api.growth.sharedResult, { token });
+    expect(Object.keys(result!).sort()).toEqual([
+      "crown",
+      "delta",
+      "finish",
+      "name",
+      "rounds",
+      "wins",
+    ]);
+    expect(
+      await t.query(api.growth.sharedResult, { token: "not-a-token" }),
+    ).toBeNull();
+  });
+});

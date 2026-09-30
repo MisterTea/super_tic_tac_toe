@@ -48,3 +48,11 @@ Set `E2E_BASE_URL` to test a deployed site instead of starting localhost. The Ro
 In Convex, inspect scheduler/action failures and function latency. The events table records joins, queue duration, CPU fill, and placements. Observe queue duration, CPU share, completion, immediate requeues, spectator wait, returns, reward errors, and usage before increasing concurrency. Keep deployment previews separate from production profiles.
 
 Defaults are intentionally centralized in `lib/royale.ts`. Snapshot changes into newly created tournaments; do not alter an in-progress bracket's rewards or timing mid-run. No season resets, prizes, purchases, or migration of previous casual game results are included.
+
+## Sharing and friend Royales
+
+Use **Host a friend Royale** on the home/results page. Copy the invitation link; guests enter the same unranked bracket. The host can start immediately, a full room starts automatically, and the room fills after two minutes. If the host leaves, the next entrant becomes host. Empty rooms close. Started room links can't admit new entrants.
+
+**Share my run** explicitly publishes only the player's name, placement, match wins, rank-point change, and own round outcomes. It creates a permanent /share/<token> page and PNG card; it does not expose opponent names, authentication data, email, or player IDs. Nothing is published until the player chooses to share.
+
+The /daily page uses 64 checked, reachable positions cycling by UTC date. Each has exactly one immediately winning legal move. Attempts are validated and persisted server-side, with three distinct guesses per profile per UTC day and no rank/XP/crown rewards. Solutions are revealed after success or the third guess; resetting a guest identity can reset guesses. Full retention and marketing measurement notes are in LAUNCH-KIT.md.

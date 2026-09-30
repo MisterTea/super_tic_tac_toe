@@ -2,6 +2,29 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  campaignMetrics: defineTable({
+    source: v.string(),
+    campaign: v.string(),
+    bucket: v.string(),
+    values: v.record(v.string(), v.number()),
+  })
+    .index("by_campaign_bucket", ["source", "campaign", "bucket"])
+    .index("by_bucket", ["bucket"]),
+  sharedResults: defineTable({
+    reward: v.id("rewards"),
+    name: v.string(),
+    finish: v.number(),
+    wins: v.number(),
+    crown: v.boolean(),
+    delta: v.number(),
+    rounds: v.array(v.object({ round: v.number(), won: v.boolean() })),
+  }).index("by_reward", ["reward"]),
+  dailyAttempts: defineTable({
+    profile: v.id("profiles"),
+    day: v.string(),
+    attempts: v.array(v.number()),
+    solved: v.boolean(),
+  }).index("by_profile_day", ["profile", "day"]),
   feedback: defineTable({
     message: v.string(),
     category: v.string(),
@@ -36,6 +59,9 @@ export default defineSchema({
     playedAt: v.optional(v.number()),
     leaderboardOptOut: v.optional(v.boolean()),
     leaderboardEligible: v.optional(v.boolean()),
+    acquisition: v.optional(
+      v.object({ source: v.string(), campaign: v.string(), at: v.number() }),
+    ),
   })
     .index("by_auth", ["authId"])
     .index("by_leaderboard", ["leaderboardEligible", "points", "crowns", "xp"]),
@@ -44,7 +70,11 @@ export default defineSchema({
     status: v.string(),
     state: v.any(),
     updatedAt: v.number(),
-  }).index("by_status_tier", ["status", "tier"]),
+    roomCode: v.optional(v.string()),
+    host: v.optional(v.id("profiles")),
+  })
+    .index("by_status_tier", ["status", "tier"])
+    .index("by_room", ["roomCode"]),
   rewards: defineTable({
     profile: v.id("profiles"),
     tournament: v.id("tournaments"),
@@ -53,6 +83,7 @@ export default defineSchema({
     xp: v.number(),
     createdAt: v.number(),
     crown: v.optional(v.boolean()),
+    entrant: v.optional(v.string()),
   })
     .index("by_profile_tournament", ["profile", "tournament"])
     .index("by_profile", ["profile"]),

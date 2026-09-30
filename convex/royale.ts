@@ -37,7 +37,7 @@ import {
   type Tournament,
 } from "../lib/royale";
 
-async function profile(ctx: QueryCtx | MutationCtx) {
+export async function profile(ctx: QueryCtx | MutationCtx) {
   const user = await authComponent.getAuthUser(ctx);
   const p = await ctx.db
     .query("profiles")
@@ -115,8 +115,15 @@ async function settle(
       xp: reward.xp + bonus,
       createdAt: now,
       crown: reward.crown,
+      entrant: e.id,
     });
     await observeReward(ctx, (await ctx.db.get(rewardId))!);
+    if (p.acquisition)
+      await recordEvent(ctx, {
+        kind: `source_result:${p.acquisition.source}:${p.acquisition.campaign}`,
+        tournament: id,
+        at: now,
+      });
     await recordEvent(ctx, {
       kind: "result",
       tournament: id,
@@ -125,7 +132,7 @@ async function settle(
     });
   }
 }
-async function save(
+export async function save(
   ctx: MutationCtx,
   id: Id<"tournaments">,
   t: Tournament,
@@ -276,15 +283,26 @@ export const dashboard = query({
       history,
       quests,
       serverNow: Date.now(),
+      roomCode: tournament?.roomCode,
+      isHost: tournament?.host === p._id,
     };
   },
 });
 export const join = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { roomCode: v.optional(v.string()) },
+  handler: async (ctx, args) => {
     const p = await profile(ctx),
       now = Date.now();
-    if (p.active) return p.active;
+    if (p.active) {
+      if (
+        args.roomCode &&
+        (await ctx.db.get(p.active))?.roomCode !== args.roomCode
+      )
+        throw new ConvexError(
+          "Leave your current lobby or finish your Royale first.",
+        );
+      return p.active;
+    }
     await activity(ctx, p, now);
     if (p.last) {
       const last = await ctx.db
@@ -306,12 +324,29 @@ export const join = mutation({
       .withIndex("by_status_tier", (q) =>
         q.eq("status", "lobby").eq("tier", tier),
       )
+      .filter((q) => q.eq(q.field("roomCode"), undefined))
       .take(20);
     let room = candidates.find(
       (r) =>
         (r.state as Tournament).closesAt > now &&
         (r.state as Tournament).entrants.length < 16,
     );
+    if (args.roomCode) {
+      room =
+        (await ctx.db
+          .query("tournaments")
+          .withIndex("by_room", (q) => q.eq("roomCode", args.roomCode))
+          .unique()) ?? undefined;
+      if (
+        !room ||
+        room.status !== "lobby" ||
+        room.state.closesAt <= now ||
+        room.state.entrants.length >= 16
+      )
+        throw new ConvexError(
+          "This friend lobby has already started or closed. Host a new Royale together.",
+        );
+    }
     if (!room) {
       const id = await ctx.db.insert("tournaments", {
         tier,
@@ -342,6 +377,12 @@ export const join = mutation({
       tournament: room._id,
       at: now,
     });
+    if (p.acquisition)
+      await recordEvent(ctx, {
+        kind: `source_join:${p.acquisition.source}:${p.acquisition.campaign}`,
+        tournament: room._id,
+        at: now,
+      });
     await save(ctx, room._id, t, now);
     return room._id;
   },
@@ -356,6 +397,10 @@ export const leaveLobby = mutation({
       throw new Error("The bracket is locked");
     const t = row.state as Tournament;
     t.entrants = t.entrants.filter((e) => e.id !== p._id);
+    if (row.host === p._id)
+      await ctx.db.patch(row._id, {
+        host: t.entrants[0]?.id as Id<"profiles"> | undefined,
+      });
     t.version++;
     if (!t.entrants.length) t.status = "cancelled";
     await ctx.db.patch(p._id, { active: undefined, last: undefined });
@@ -521,7 +566,10 @@ export const linkProfiles = internalMutation({
       if (!duplicate) {
         xp += r.xp;
         if (r.crown ?? (r.finish === 4 && r.xp > 0)) crowns++;
-        await ctx.db.patch(r._id, { profile: target._id });
+        await ctx.db.patch(r._id, {
+          profile: target._id,
+          entrant: r.entrant ?? source._id,
+        });
       }
     }
     const quests = await ctx.db
@@ -545,6 +593,31 @@ export const linkProfiles = internalMutation({
         });
     }
     const unlocked = [...new Set([...target.cosmetics, ...source.cosmetics])];
+    const dailyRuns = await ctx.db
+      .query("dailyAttempts")
+      .withIndex("by_profile_day", (q) => q.eq("profile", source._id))
+      .collect();
+    for (const run of dailyRuns) {
+      const other = await ctx.db
+        .query("dailyAttempts")
+        .withIndex("by_profile_day", (q) =>
+          q.eq("profile", target._id).eq("day", run.day),
+        )
+        .unique();
+      if (!other) await ctx.db.patch(run._id, { profile: target._id });
+      else {
+        const best = [run, other]
+          .filter((r) => r.solved)
+          .sort((a, b) => a.attempts.length - b.attempts.length)[0];
+        await ctx.db.patch(other._id, {
+          solved: !!best,
+          attempts:
+            best?.attempts ??
+            [...new Set([...other.attempts, ...run.attempts])].slice(0, 3),
+        });
+        await ctx.db.delete(run._id);
+      }
+    }
     await ctx.db.patch(target._id, {
       points: Math.max(target.points, source.points),
       xp: target.xp + xp,
@@ -555,6 +628,7 @@ export const linkProfiles = internalMutation({
         source.playedAt === undefined
           ? target.playedAt
           : Math.min(source.playedAt, target.playedAt ?? source.playedAt),
+      acquisition: target.acquisition ?? source.acquisition,
     });
     await observeProfile(ctx, (await ctx.db.get(target._id))!);
     // Retain historical entrant IDs, but revoke the old profile's account association.

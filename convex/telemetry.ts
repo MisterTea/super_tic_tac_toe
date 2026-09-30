@@ -11,6 +11,33 @@ import { DEFAULT_SETTINGS, type Tournament } from "../lib/royale";
 
 type Values = Record<string, number>;
 const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
+export async function sourceMetric(
+  ctx: MutationCtx,
+  acquisition: { source: string; campaign: string },
+  at: number,
+  metric: string,
+) {
+  for (const bucket of ["all", utcDay(at)]) {
+    const row = await ctx.db
+      .query("campaignMetrics")
+      .withIndex("by_campaign_bucket", (q) =>
+        q
+          .eq("source", acquisition.source)
+          .eq("campaign", acquisition.campaign)
+          .eq("bucket", bucket),
+      )
+      .unique();
+    const values = { ...(row?.values || {}) };
+    values[metric] = (values[metric] || 0) + 1;
+    if (row) await ctx.db.patch(row._id, { values });
+    else
+      await ctx.db.insert("campaignMetrics", {
+        ...acquisition,
+        bucket,
+        values,
+      });
+  }
+}
 
 // Facts are stable source IDs. Retries, account linking, and historical backfill
 // apply only the difference, in the same transaction as the game operation.
@@ -60,6 +87,8 @@ async function participated(ctx: MutationCtx, id: Id<"profiles">, at: number) {
   if (!p || p.authId.startsWith("linked:") || p.playedAt !== undefined) return;
   await ctx.db.patch(id, { playedAt: at });
   await observeProfile(ctx, { ...p, playedAt: at });
+  if (p.acquisition)
+    await sourceMetric(ctx, p.acquisition, at, "firstMatchesStarted");
 }
 
 export async function activity(
@@ -153,7 +182,32 @@ export async function observeTournament(
         cpuOnlyGamesPlayed: human ? 0 : 1,
       });
     }
-    if (m.status === "finished")
+    if (m.status === "finished") {
+      for (const player of began ? m.players : []) {
+        if (!t.entrants.some((e) => e.id === player && !e.cpu)) continue;
+        const key = `first-finish:${player}`;
+        if (
+          await ctx.db
+            .query("metricFacts")
+            .withIndex("by_key", (q) => q.eq("key", key))
+            .unique()
+        )
+          continue;
+        const p = await ctx.db.get(player as Id<"profiles">);
+        const playedThrough =
+          m.reason === "board victory" || m.reason === "board score";
+        if (p?.acquisition)
+          await sourceMetric(
+            ctx,
+            p.acquisition,
+            m.finishedAt || m.startAt,
+            "firstMatchesCompleted",
+          );
+        await fact(ctx, key, m.finishedAt || m.startAt, {
+          firstMatchesCompleted: 1,
+          firstMatchesPlayedThrough: playedThrough ? 1 : 0,
+        });
+      }
       await fact(ctx, `match-finish:${id}:${m.id}`, m.finishedAt || m.startAt, {
         matchesCompleted: 1,
         humanMatchesCompleted: human ? 1 : 0,
@@ -169,6 +223,7 @@ export async function observeTournament(
           ? Math.max(0, (m.finishedAt || m.startAt) - m.startAt)
           : 0,
       });
+    }
   }
   if (t.status === "finished" && previous?.status !== "finished") {
     const at = Math.max(...t.matches.map((m) => m.finishedAt || 0));
@@ -187,8 +242,24 @@ async function observeEvent(ctx: MutationCtx, e: Doc<"events">) {
     immediate_requeue: "immediateRequeues",
     daily_return: "returnVisits",
     scheduler_recovery: "schedulerRecoveries",
+    friend_lobby_created: "friendLobbiesCreated",
+    result_share: "resultsShared",
+    daily_challenge_start: "dailyChallengesStarted",
+    daily_challenge_solved: "dailyChallengesSolved",
   };
   const values: Values = mapped[e.kind] ? { [mapped[e.kind]]: 1 } : {};
+  const sourceEvent = /^source_(visit|join|result):([^:]+):([^:]+)$/.exec(
+    e.kind,
+  );
+  if (sourceEvent)
+    await sourceMetric(
+      ctx,
+      { source: sourceEvent[2], campaign: sourceEvent[3] },
+      e.at,
+      { visit: "visitors", join: "entries", result: "results" }[
+        sourceEvent[1] as "visit" | "join" | "result"
+      ],
+    );
   if (e.kind === "spectator_wait_ms")
     Object.assign(values, {
       spectatorWaitSamples: 1,

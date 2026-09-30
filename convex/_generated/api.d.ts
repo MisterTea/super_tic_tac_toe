@@ -11,7 +11,9 @@
 import type * as auth from "../auth.js";
 import type * as bots from "../bots.js";
 import type * as crons from "../crons.js";
+import type * as daily from "../daily.js";
 import type * as feedback from "../feedback.js";
+import type * as growth from "../growth.js";
 import type * as http from "../http.js";
 import type * as leaderboard from "../leaderboard.js";
 import type * as names from "../names.js";
@@ -28,7 +30,9 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   bots: typeof bots;
   crons: typeof crons;
+  daily: typeof daily;
   feedback: typeof feedback;
+  growth: typeof growth;
   http: typeof http;
   leaderboard: typeof leaderboard;
   names: typeof names;

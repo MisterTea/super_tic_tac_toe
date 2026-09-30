@@ -26,6 +26,9 @@ import { GameSounds } from "../../lib/sounds";
 import Board from "./board";
 import StatHeader from "../stat-header";
 import FeedbackButton from "../feedback-button";
+import ShareLink from "../share-link";
+import ResultShare from "../result-share";
+import DailyChallenge from "../daily-challenge";
 import { ConvexError } from "convex/values";
 
 const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -59,10 +62,10 @@ function Shell({ children }: { children: ReactNode }) {
       <header>
         <StatHeader />
         <div className="header-tools">
-        <FeedbackButton />
-        <a className="badge" href="/leaderboard">
-          Leaderboard ↗
-        </a>
+          <FeedbackButton />
+          <a className="badge" href="/leaderboard">
+            Leaderboard ↗
+          </a>
         </div>
       </header>
       {children}
@@ -217,7 +220,13 @@ function GuestLoginPrompt({
     </div>
   );
 }
-export default function Royale({ account = false }: { account?: boolean }) {
+export default function Royale({
+  account = false,
+  daily = false,
+}: {
+  account?: boolean;
+  daily?: boolean;
+}) {
   if (!url)
     return (
       <Shell>
@@ -244,15 +253,16 @@ export default function Royale({ account = false }: { account?: boolean }) {
         client={getClient()}
         authClient={authClient as unknown as AuthClient}
       >
-        <Session account={account} />
+        <Session account={account} daily={daily} />
       </ConvexBetterAuthProvider>
     </Boundary>
   );
 }
-function Session({ account }: { account: boolean }) {
+function Session({ account, daily }: { account: boolean; daily: boolean }) {
   const { isAuthenticated } = useConvexAuth();
   const session = authClient.useSession();
   const ensure = useMutation(api.royale.ensureProfile);
+  const attribute = useMutation(api.growth.attribute);
   const [ready, setReady] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
@@ -283,7 +293,12 @@ function Session({ account }: { account: boolean }) {
     }
     let alive = true;
     void ensure({})
-      .then(() => {
+      .then(async () => {
+        const params = new URLSearchParams(location.search);
+        await attribute({
+          source: params.get("utm_source") || "direct",
+          campaign: params.get("utm_campaign") || "none",
+        });
         if (alive) setReady(true);
       })
       .catch((e) => {
@@ -292,7 +307,7 @@ function Session({ account }: { account: boolean }) {
     return () => {
       alive = false;
     };
-  }, [isAuthenticated, ensure]);
+  }, [isAuthenticated, ensure, attribute]);
   if (!ready)
     return (
       <Shell>
@@ -309,7 +324,18 @@ function Session({ account }: { account: boolean }) {
       </Shell>
     );
   const guest = !!session.data?.user.isAnonymous;
-  return account ? <Account guest={guest} /> : <Arena guest={guest} />;
+  return account ? (
+    <Account guest={guest} />
+  ) : daily ? (
+    <Shell>
+      <a className="secondary" href="/">
+        ← Royale
+      </a>
+      <DailyChallenge />
+    </Shell>
+  ) : (
+    <Arena guest={guest} />
+  );
 }
 function Account({ guest }: { guest: boolean }) {
   const data = useQuery(api.royale.dashboard, {});
@@ -512,6 +538,16 @@ function Account({ guest }: { guest: boolean }) {
   );
 }
 function Arena({ guest }: { guest: boolean }) {
+  const [invitation, setInvitation] = useState<string | null>(null);
+  useEffect(() => {
+    setInvitation(new URLSearchParams(location.search).get("room"));
+  }, []);
+  const invitedRoom = useQuery(
+    api.growth.room,
+    invitation ? { code: invitation } : "skip",
+  );
+  const host = useMutation(api.growth.host),
+    start = useMutation(api.growth.start);
   const data = useQuery(api.royale.dashboard, {});
   const providers = useQuery(api.auth.providers, {});
   const join = useMutation(api.royale.join),
@@ -670,6 +706,45 @@ function Arena({ guest }: { guest: boolean }) {
           <button onClick={() => setError("")}>Dismiss</button>
         </div>
       ) : null}
+      {invitation && !p.active ? (
+        <section className="royale-card invitation">
+          <div className="eyebrow">YOU'RE INVITED</div>
+          <h2>A Royale with friends.</h2>
+          <p>
+            {invitedRoom === undefined
+              ? "Checking your lobby…"
+              : invitedRoom?.open
+                ? `${invitedRoom.count}/16 seats filled · no login needed · unranked`
+                : "This lobby has started or closed. Host a new one together."}
+          </p>
+          {invitedRoom?.open ? (
+            <button
+              className="primary"
+              disabled={pending}
+              onClick={() =>
+                void act(async () => {
+                  setWatchResults(false);
+                  setSelectedMatch(null);
+                  await join({ roomCode: invitation });
+                  setInvitation(null);
+                  history.replaceState(null, "", "/");
+                })
+              }
+            >
+              Join friend Royale →
+            </button>
+          ) : null}
+          <button
+            className="secondary"
+            onClick={() => {
+              setInvitation(null);
+              history.replaceState(null, "", "/");
+            }}
+          >
+            Dismiss invitation
+          </button>
+        </section>
+      ) : null}
       {idle ? (
         <div className="game-choices">
           <section className="intro royale-intro">
@@ -677,13 +752,13 @@ function Arena({ guest }: { guest: boolean }) {
               ROYALE · 16 PLAYERS. FOUR ROUNDS. ONE CROWN.
             </div>
             <h1>
-              Think ahead.
+              Tic-tac-toe.
               <br />
-              <span>Stay alive.</span>
+              <span>Battle royale.</span>
             </h1>
             <p>
-              Outplay your rival. Watch your next opponent. Win your way through
-              the bracket.
+              Four rounds. One crown. Can you win? Outplay your rival, scout
+              your next opponent, and survive the bracket.
             </p>
             <button
               className="primary royale-cta"
@@ -701,6 +776,27 @@ function Arena({ guest }: { guest: boolean }) {
             <p className="fine-print">
               {tier} matchmaking · Brackets start after 30 seconds · 75-second
               thinking clocks
+            </p>
+            <div className="growth-options">
+              <button
+                className="secondary"
+                disabled={pending}
+                onClick={() =>
+                  void act(async () => {
+                    await host({});
+                    setWatchResults(false);
+                    setSelectedMatch(null);
+                  })
+                }
+              >
+                Host a friend Royale →
+              </button>
+              <a className="secondary" href="/daily">
+                Today's daily challenge →
+              </a>
+            </div>
+            <p className="fine-print">
+              Free in your browser. No download or login needed.
             </p>
           </section>
           <SingleGames />
@@ -737,6 +833,30 @@ function Arena({ guest }: { guest: boolean }) {
               ))}
             </div>
             <p>Your bracket starts when the countdown ends.</p>
+            {data.roomCode ? (
+              <div className="friend-invite">
+                <p>
+                  Friend Royale · unranked. Invite your friends before the
+                  bracket starts.
+                </p>
+                <ShareLink
+                  url={`${location.origin}/?room=${data.roomCode}&utm_source=invite&utm_campaign=${data.roomCode}`}
+                  text="Join my Tic Tac Toe Royale. Four rounds. One crown."
+                  label="Invite friends"
+                />
+                {data.isHost ? (
+                  <button
+                    className="primary"
+                    disabled={pending}
+                    onClick={() => void act(() => start({}))}
+                  >
+                    Start Royale now →
+                  </button>
+                ) : (
+                  <p>The host can start when everyone is ready.</p>
+                )}
+              </div>
+            ) : null}
             <button
               className="secondary"
               disabled={pending}
@@ -797,6 +917,31 @@ function Arena({ guest }: { guest: boolean }) {
             >
               Play again →
             </button>
+            {result && t.id ? (
+              <ResultShare
+                key={t.id}
+                tournament={t.id}
+                crown={!!result.crown}
+              />
+            ) : null}
+            <div className="growth-options">
+              <button
+                className="secondary"
+                disabled={pending}
+                onClick={() =>
+                  void act(async () => {
+                    await host({});
+                    setWatchResults(false);
+                    setSelectedMatch(null);
+                  })
+                }
+              >
+                Host a friend Royale →
+              </button>
+              <a className="secondary" href="/daily">
+                Today's daily challenge →
+              </a>
+            </div>
             {t.status === "active" ? (
               <button
                 className="secondary"
