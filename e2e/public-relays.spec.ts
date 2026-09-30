@@ -8,7 +8,7 @@ test("public Nostr relays connect private invite peers", async ({
   try {
     const host = await a.newPage(),
       guest = await b.newPage();
-    await host.goto("/");
+    await host.goto("/practice");
     await host.getByText("Relay settings", { exact: true }).click();
     await host.getByLabel("Relay URLs").fill(process.env.PUBLIC_RELAYS!);
     await host.getByRole("button", { name: "Host game", exact: true }).click();

@@ -19,7 +19,7 @@ test("private invite seats one guest, streams late spectators, and ends everyone
     const errors: string[] = [];
     for (const p of [host, guest, viewer, late])
       p.on("pageerror", (e) => errors.push(e.message));
-    await host.goto("/");
+    await host.goto("/practice");
     await host.getByText("Relay settings", { exact: true }).click();
     await host.getByLabel("Relay URLs").fill(relay.url);
     await host.getByRole("button", { name: "Host game", exact: true }).click();
@@ -116,7 +116,7 @@ test("host tab closing notifies the guest and spectators", async ({
     const [host, guest, viewer] = await Promise.all(
       contexts.map((c) => c.newPage()),
     );
-    await host.goto("/");
+    await host.goto("/practice");
     await host.getByText("Relay settings", { exact: true }).click();
     await host.getByLabel("Relay URLs").fill(relay.url);
     await host.getByRole("button", { name: "Host game", exact: true }).click();
@@ -144,283 +144,118 @@ test("host tab closing notifies the guest and spectators", async ({
     await relay.close();
   }
 });
-test("random opponents match through the signed pool", async ({ browser }) => {
-  const relay = await localRelay(),
-    a = await browser.newContext(),
-    b = await browser.newContext();
-  try {
-    const one = await a.newPage(),
-      two = await b.newPage();
-    for (const p of [one, two]) {
-      await p.goto("/");
-      await p.getByText("Relay settings", { exact: true }).click();
-      await p.getByLabel("Relay URLs").fill(relay.url);
-    }
-    await one
-      .getByRole("button", { name: "Play random opponent", exact: true })
-      .click();
-    await expect(
-      one.getByRole("progressbar", { name: "Searching for game" }),
-    ).toHaveAttribute("max", "30");
-    await expect(one.locator(".board")).toHaveCount(0);
-    await expect
-      .poll(() =>
-        relay.events.some((e) => JSON.parse(e.content).type === "available"),
-      )
-      .toBe(true);
-    await two
-      .getByRole("button", { name: "Play random opponent", exact: true })
-      .click();
-    for (const p of [one, two])
-      await expect(p.getByRole("status")).toContainText("Connected", {
-        timeout: 8000,
-      });
-    await two
-      .getByRole("button", { name: "Board 5, square 5", exact: true })
-      .click();
-    await expect(
-      one.getByRole("button", { name: "Board 5, square 5, X", exact: true }),
-    ).toHaveText("✕");
-    await one
-      .getByRole("button", { name: "Board 5, square 1", exact: true })
-      .click();
-    await expect(
-      two.getByRole("button", { name: "Board 5, square 1, O", exact: true }),
-    ).toHaveText("◯");
-    await two.close();
-    await expect(one.getByRole("status")).toContainText("host left");
-    await expect(one.locator(".score")).toContainText("You win");
-    expect(
-      relay.events.some((e) => JSON.parse(e.content).type === "withdraw"),
-    ).toBe(true);
-  } finally {
-    await a.close();
-    await b.close();
-    await relay.close();
-  }
-});
-test("no opponent falls back after ten seconds, delays AI replies, and auto-moves at sixty seconds", async ({
-  page,
-}) => {
-  const relay = await localRelay();
-  try {
-    await page.goto("/");
-    await page.getByText("Relay settings", { exact: true }).click();
-    await page.getByLabel("Relay URLs").fill(relay.url);
-    await page
-      .getByRole("button", { name: "Play random opponent", exact: true })
-      .click();
-    await expect(page.getByRole("status")).toContainText("Searching for game");
-    await expect(page.getByRole("status")).toContainText("Match ready", {
-      timeout: 20000,
-    });
-    await page.clock.install();
-    await page.clock.pauseAt(new Date(Date.now() + 50));
-    await page.clock.runFor(60050);
-    await expect(
-      page.locator(".board button").filter({ hasText: "✕" }),
-    ).toHaveCount(1);
-    await expect(
-      page.locator(".board button").filter({ hasText: "◯" }),
-    ).toHaveCount(0);
-    await page.clock.runFor(5500);
-    await expect(
-      page.locator(".board button").filter({ hasText: "◯" }),
-    ).toHaveCount(1);
-    await expect(page.getByLabel("Seconds remaining")).toHaveText(
-      /(?:5[0-9]|60)s/,
-    );
-    expect(
-      relay.events.some((e) => JSON.parse(e.content).type === "withdraw"),
-    ).toBe(true);
-  } finally {
-    await relay.close();
-  }
-});
-for (const matchmaking of [false, true])
-  test(`${matchmaking ? "Matchmaking" : "Invite"} host enforces automatic random moves on both seats after sixty seconds`, async ({
-    browser,
-  }) => {
-    const relay = await localRelay(),
-      a = await browser.newContext(),
-      b = await browser.newContext();
-    try {
-      const host = await a.newPage(),
-        guest = await b.newPage();
-      for (const page of [host, guest])
-        await page.addInitScript(() => {
-          const stats = window as unknown as Window & { receivedPings: number };
-          stats.receivedPings = 0;
-          const observe = (channel: RTCDataChannel) =>
-            channel.addEventListener("message", (event) => {
-              if (JSON.parse(event.data).type === "ping") stats.receivedPings++;
-            });
-          const Native = RTCPeerConnection;
-          window.RTCPeerConnection = class extends Native {
-            constructor(configuration?: RTCConfiguration) {
-              super(configuration);
-              this.addEventListener("datachannel", (event) =>
-                observe(event.channel),
-              );
-            }
-            createDataChannel(label: string, options?: RTCDataChannelInit) {
-              const channel = super.createDataChannel(label, options);
-              observe(channel);
-              return channel;
-            }
-          };
-        });
-      for (const page of [host, guest]) {
-        await page.goto("/");
-        await page.getByText("Relay settings", { exact: true }).click();
-        await page.getByLabel("Relay URLs").fill(relay.url);
-      }
-      if (matchmaking) {
-        await guest
-          .getByRole("button", { name: "Play random opponent", exact: true })
-          .click();
-        await expect
-          .poll(() =>
-            relay.events.some(
-              (e) => JSON.parse(e.content).type === "available",
-            ),
-          )
-          .toBe(true);
-        await host
-          .getByRole("button", { name: "Play random opponent", exact: true })
-          .click();
-      } else {
-        await host
-          .getByRole("button", { name: "Host game", exact: true })
-          .click();
-        await expect(host.getByRole("status")).toContainText(
-          "Private lobby ready",
-        );
-        await guest.goto(await host.getByLabel("Invite link").inputValue());
-      }
-      await expect(guest.getByRole("status")).toContainText("Connected");
-      await host.evaluate(() => {
-        Math.random = () => 0.999999;
-      });
-      await host.clock.install();
-      await guest.clock.install();
-      const paused = new Date(Date.now() + 100);
-      await host.clock.pauseAt(paused);
-      await guest.clock.pauseAt(paused);
-      for (let step = 0; step < 12; step++) {
-        const before = await host.evaluate(
-          () =>
-            (window as unknown as Window & { receivedPings: number })
-              .receivedPings,
-        );
-        await host.clock.runFor(5000);
-        await guest.clock.runFor(5000);
-        // Drain real WebRTC delivery before advancing either browser's virtual clock again.
-        await expect
-          .poll(() =>
-            host.evaluate(
-              () =>
-                (window as unknown as Window & { receivedPings: number })
-                  .receivedPings,
-            ),
-          )
-          .toBeGreaterThan(before);
-      }
-      await expect(
-        host.locator(".board button").filter({ hasText: "✕" }),
-      ).toHaveCount(1);
-      await expect(
-        guest.locator(".board button").filter({ hasText: "✕" }),
-      ).toHaveCount(1);
-      await expect(
-        host.getByRole("button", { name: "Board 9, square 9, X", exact: true }),
-      ).toHaveText("✕");
-      for (let step = 0; step < 12; step++) {
-        const before = await host.evaluate(
-          () =>
-            (window as unknown as Window & { receivedPings: number })
-              .receivedPings,
-        );
-        await host.clock.runFor(5000);
-        await guest.clock.runFor(5000);
-        // Drain real WebRTC delivery before advancing either browser's virtual clock again.
-        await expect
-          .poll(() =>
-            host.evaluate(
-              () =>
-                (window as unknown as Window & { receivedPings: number })
-                  .receivedPings,
-            ),
-          )
-          .toBeGreaterThan(before);
-      }
-      await host.clock.runFor(1500);
-      await guest.clock.runFor(1500);
-      await expect(host.getByRole("status")).not.toContainText("left");
-      await expect(
-        host.locator(".board button").filter({ hasText: "◯" }),
-      ).toHaveCount(1);
-      await expect(
-        guest.locator(".board button").filter({ hasText: "◯" }),
-      ).toHaveCount(1);
-      await expect(
-        guest.getByRole("button", {
-          name: "Board 9, square 8, O",
-          exact: true,
-        }),
-      ).toHaveText("◯");
-      await expect(host.getByRole("status")).not.toContainText("left");
-    } finally {
-      await a.close();
-      await b.close();
-      await relay.close();
-    }
-  });
-test("failed peer negotiation re-enters the pool then starts a practice match", async ({
+test("Invite host enforces automatic random moves on both seats after sixty seconds", async ({
   browser,
 }) => {
   const relay = await localRelay(),
     a = await browser.newContext(),
     b = await browser.newContext();
   try {
-    const waiting = await a.newPage(),
-      requesting = await b.newPage();
-    await requesting.addInitScript(() => {
-      window.RTCPeerConnection = class extends RTCPeerConnection {
-        constructor(configuration?: RTCConfiguration) {
-          super(configuration);
-          this.close();
-          throw new Error("Simulated WebRTC failure");
-        }
-      };
-    });
-    for (const p of [waiting, requesting]) {
-      await p.goto("/");
-      await p.getByText("Relay settings", { exact: true }).click();
-      await p.getByLabel("Relay URLs").fill(relay.url);
+    const host = await a.newPage(),
+      guest = await b.newPage();
+    for (const page of [host, guest])
+      await page.addInitScript(() => {
+        const stats = window as unknown as Window & { receivedPings: number };
+        stats.receivedPings = 0;
+        const observe = (channel: RTCDataChannel) =>
+          channel.addEventListener("message", (event) => {
+            if (JSON.parse(event.data).type === "ping") stats.receivedPings++;
+          });
+        const Native = RTCPeerConnection;
+        window.RTCPeerConnection = class extends Native {
+          constructor(configuration?: RTCConfiguration) {
+            super(configuration);
+            this.addEventListener("datachannel", (event) =>
+              observe(event.channel),
+            );
+          }
+          createDataChannel(label: string, options?: RTCDataChannelInit) {
+            const channel = super.createDataChannel(label, options);
+            observe(channel);
+            return channel;
+          }
+        };
+      });
+    for (const page of [host, guest]) {
+      await page.goto("/practice");
+      await page.getByText("Relay settings", { exact: true }).click();
+      await page.getByLabel("Relay URLs").fill(relay.url);
     }
-    await waiting
-      .getByRole("button", { name: "Play random opponent", exact: true })
-      .click();
-    await expect
-      .poll(() =>
-        relay.events.some((e) => JSON.parse(e.content).type === "available"),
-      )
-      .toBe(true);
-    await requesting
-      .getByRole("button", { name: "Play random opponent", exact: true })
-      .click();
-    await expect
-      .poll(
-        () =>
-          relay.events.filter((e) => JSON.parse(e.content).type === "available")
-            .length,
-      )
-      .toBeGreaterThan(1);
-    await expect(requesting.getByRole("status")).toContainText("Match ready", {
-      timeout: 20000,
+    await host.getByRole("button", { name: "Host game", exact: true }).click();
+    await expect(host.getByRole("status")).toContainText("Private lobby ready");
+    await guest.goto(await host.getByLabel("Invite link").inputValue());
+    await expect(guest.getByRole("status")).toContainText("Connected");
+    await host.evaluate(() => {
+      Math.random = () => 0.999999;
     });
-    await expect(requesting.getByLabel("Seconds remaining")).toBeVisible();
+    await host.clock.install();
+    await guest.clock.install();
+    const paused = new Date(Date.now() + 100);
+    await host.clock.pauseAt(paused);
+    await guest.clock.pauseAt(paused);
+    for (let step = 0; step < 12; step++) {
+      const before = await host.evaluate(
+        () =>
+          (window as unknown as Window & { receivedPings: number })
+            .receivedPings,
+      );
+      await host.clock.runFor(5000);
+      await guest.clock.runFor(5000);
+      // Drain real WebRTC delivery before advancing either browser's virtual clock again.
+      await expect
+        .poll(() =>
+          host.evaluate(
+            () =>
+              (window as unknown as Window & { receivedPings: number })
+                .receivedPings,
+          ),
+        )
+        .toBeGreaterThan(before);
+    }
+    await expect(
+      host.locator(".board button").filter({ hasText: "✕" }),
+    ).toHaveCount(1);
+    await expect(
+      guest.locator(".board button").filter({ hasText: "✕" }),
+    ).toHaveCount(1);
+    await expect(
+      host.getByRole("button", { name: "Board 9, square 9, X", exact: true }),
+    ).toHaveText("✕");
+    for (let step = 0; step < 12; step++) {
+      const before = await host.evaluate(
+        () =>
+          (window as unknown as Window & { receivedPings: number })
+            .receivedPings,
+      );
+      await host.clock.runFor(5000);
+      await guest.clock.runFor(5000);
+      // Drain real WebRTC delivery before advancing either browser's virtual clock again.
+      await expect
+        .poll(() =>
+          host.evaluate(
+            () =>
+              (window as unknown as Window & { receivedPings: number })
+                .receivedPings,
+          ),
+        )
+        .toBeGreaterThan(before);
+    }
+    await host.clock.runFor(1500);
+    await guest.clock.runFor(1500);
+    await expect(host.getByRole("status")).not.toContainText("left");
+    await expect(
+      host.locator(".board button").filter({ hasText: "◯" }),
+    ).toHaveCount(1);
+    await expect(
+      guest.locator(".board button").filter({ hasText: "◯" }),
+    ).toHaveCount(1);
+    await expect(
+      guest.getByRole("button", {
+        name: "Board 9, square 8, O",
+        exact: true,
+      }),
+    ).toHaveText("◯");
+    await expect(host.getByRole("status")).not.toContainText("left");
   } finally {
     await a.close();
     await b.close();

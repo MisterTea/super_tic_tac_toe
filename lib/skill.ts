@@ -111,9 +111,7 @@ export function evidence(
   };
   const local = notice(b),
     route = notice(c);
-  const ownership = s.boards.flatMap((v, i) =>
-    Math.abs(v) === 1 ? [notice(i)] : [],
-  );
+  const ownership = s.boards.flatMap((v, i) => (v !== 0 ? [notice(i)] : []));
   const macro =
     p.macro * (ownership.length ? ownership.reduce((a, b) => a * b, 1) : 1);
   return [
@@ -154,9 +152,7 @@ function boundedScores(
   };
   const macro = rng() < p.macro ? 1 : 0;
   const macroNoticed = (t: State) =>
-    macro && t.boards.every((v, b) => Math.abs(v) !== 1 || observed(b) === 1)
-      ? 1
-      : 0;
+    macro && t.boards.every((v, b) => v === 0 || observed(b) === 1) ? 1 : 0;
   const score = (t: State, a: number) => {
     const b = Math.floor(a / 9),
       c = a % 9,
@@ -184,7 +180,8 @@ function boundedScores(
   let nodes = 0;
   const budget = 400;
   const walk = (t: State, depth: number): number => {
-    if (t.winner) return t.winner === 2 || !macroNoticed(t) ? 0 : -1000;
+    if (t.winner)
+      return !macroNoticed(t) ? 0 : t.winner === t.turn ? 1000 : -1000;
     if (depth <= 0 || nodes >= budget) return 0;
     const ranked = legal(t)
       .map((a) => ({ a, v: score(t, a) }))

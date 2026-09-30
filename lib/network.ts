@@ -8,7 +8,7 @@ import {
   type Event,
 } from "nostr-tools";
 import { initial, legal, play, replay, State } from "./game";
-const topic = "ultimate-relay-v2",
+const topic = "ultimate-relay-v3",
   kind = 20078;
 export type Role = "host" | "guest" | "spectator";
 export type SessionInfo = {

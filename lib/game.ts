@@ -30,6 +30,22 @@ export function result(c: number[]): number {
     if (Math.abs(c[a]) === 1 && c[a] === c[b] && c[b] === c[d]) return c[a];
   return c.every((x) => x !== 0) ? 2 : 0;
 }
+// Wildcards count in lines for both players, but are not owned pieces.
+export function winningLine(boards: number[], player: number) {
+  return lines.find((line) =>
+    line.every((b) => boards[b] === player || boards[b] === 2),
+  );
+}
+export function scoreWinner(boards: number[]): Player {
+  const x = boards.filter((b) => b === 1).length;
+  const o = boards.filter((b) => b === -1).length;
+  return o > x ? -1 : 1; // X always goes first.
+}
+export function macroResult(boards: number[], mover: Player): number {
+  if (winningLine(boards, mover)) return mover;
+  if (winningLine(boards, -mover)) return -mover;
+  return boards.every((b) => b !== 0) ? scoreWinner(boards) : 0;
+}
 export function legal(s: State): number[] {
   return s.winner
     ? []
@@ -54,7 +70,7 @@ export function play(s: State, a: number): State {
     boards,
     turn: s.turn === 1 ? -1 : 1,
     forced: boards[a % 9] ? -1 : a % 9,
-    winner: result(boards),
+    winner: macroResult(boards, s.turn),
     moves: [...s.moves, a],
   };
 }
@@ -96,7 +112,7 @@ export function actionFeatures(s: State, a: number): number[] {
     lines.some(
       (l) =>
         l.includes(index) &&
-        l.filter((i) => v[i] === player).length === 2 &&
+        l.filter((i) => v[i] === player || v[i] === 2).length === 2 &&
         l.filter((i) => v[i] === 0).length === 1,
     );
   const closed = macro[c] !== 0;
@@ -112,13 +128,13 @@ export function actionFeatures(s: State, a: number): number[] {
     lines.filter(
       (l) =>
         l.includes(b) &&
-        !l.some((i) => s.boards[i] === -p || s.boards[i] === 2) &&
-        l.some((i) => s.boards[i] === p),
+        !l.some((i) => s.boards[i] === -p) &&
+        l.some((i) => s.boards[i] === p || s.boards[i] === 2),
     ).length / 4;
   return [
     +won,
     +(blocking > 0),
-    +(result(macro) === p),
+    +(macroResult(macro, p) === p),
     +(won && threat(s.boards, b, -p)),
     +danger,
     +(danger && threat(macro, c, -p)),

@@ -5,6 +5,14 @@ def result(c):
     for a,b,d in LINES:
         if abs(c[a]) == 1 and c[a] == c[b] == c[d]: return c[a]
     return 2 if all(c) else 0
+def winning_line(boards, player):
+    return next((line for line in LINES if all(boards[b] in (player,2) for b in line)), None)
+def score_winner(boards):
+    return -1 if boards.count(-1)>boards.count(1) else 1
+def macro_result(boards, mover):
+    if winning_line(boards,mover):return mover
+    if winning_line(boards,-mover):return -mover
+    return score_winner(boards) if all(boards) else 0
 @dataclass
 class Game:
     cells: list = field(default_factory=lambda: [0]*81)
@@ -21,7 +29,7 @@ class Game:
         b=a//9
         self.boards[b]=result(self.cells[b*9:b*9+9])
         self.forced=-1 if self.boards[a%9] else a%9
-        self.winner=result(self.boards)
+        self.winner=macro_result(self.boards,self.turn)
         self.turn=-self.turn
         self.moves.append(a)
     def features(self):
@@ -34,9 +42,9 @@ class Game:
         board[c]=p
         won=result(board)==p;macro=self.boards.copy();macro[b]=result(board)
         def threat(v,index,player):
-            return any(index in line and sum(v[i]==player for i in line)==2 and sum(v[i]==0 for i in line)==1 for line in LINES)
+            return any(index in line and sum(v[i] in (player,2) for i in line)==2 and sum(v[i]==0 for i in line)==1 for line in LINES)
         closed=macro[c]!=0
         target=board if b==c else self.cells[c*9:c*9+9]
         danger=not closed and any(sum(target[i]==-p for i in line)==2 and sum(target[i]==0 for i in line)==1 for line in LINES)
-        macro_potential=sum(b in line and not any(self.boards[i] in (-p,2) for i in line) and any(self.boards[i]==p for i in line) for line in LINES)/4
-        return list(map(float,[won,blocking>0,result(macro)==p,won and threat(self.boards,b,-p),danger,danger and threat(macro,c,-p),closed,c==4,won and b==4,potential,won*macro_potential,blocking/2]))
+        macro_potential=sum(b in line and not any(self.boards[i]==-p for i in line) and any(self.boards[i] in (p,2) for i in line) for line in LINES)/4
+        return list(map(float,[won,blocking>0,macro_result(macro,p)==p,won and threat(self.boards,b,-p),danger,danger and threat(macro,c,-p),closed,c==4,won and b==4,potential,won*macro_potential,blocking/2]))

@@ -8,7 +8,7 @@ test("computer lazily loads local PyTorch model, uses ten skill levels, and reus
     if (r.url().includes("/ai/")) files.push(r.url());
   });
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/practice");
   await expect(page.locator(".board")).toHaveCount(0);
   const slider = page.getByRole("slider", { name: /Difficulty/ });
   await expect(slider).toHaveValue("5");
@@ -46,7 +46,7 @@ test("computer lazily loads local PyTorch model, uses ten skill levels, and reus
   await expect(
     page.getByRole("button", { name: "Board 5, square 5, X", exact: true }),
   ).not.toHaveClass(/last-move/);
-  await expect(slider).toHaveCount(0);
+  await expect(slider).toHaveValue("10");
   await expect(
     page.getByRole("button", { name: "Host game", exact: true }),
   ).toHaveCount(0);
@@ -79,7 +79,7 @@ test("failed model load is visible and retry succeeds without a fallback bot", a
   page,
 }) => {
   await page.route("**/ai/policy.onnx", (route) => route.abort());
-  await page.goto("/");
+  await page.goto("/practice");
   await page
     .getByRole("button", { name: "Play the computer", exact: true })
     .click();
@@ -108,7 +108,7 @@ test("computer board stays hidden until the model has loaded", async ({
     await pending;
     await route.continue();
   });
-  await page.goto("/");
+  await page.goto("/practice");
   await expect(page.locator(".arena")).toHaveCount(0);
   await page
     .getByRole("button", { name: "Play the computer", exact: true })

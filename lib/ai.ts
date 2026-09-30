@@ -1,4 +1,11 @@
-import { actionFeatures, features, legal, play, lines, State } from "./game";
+import {
+  actionFeatures,
+  features,
+  legal,
+  play,
+  macroResult,
+  State,
+} from "./game";
 export type DensePolicy = {
   w1: number[][];
   b1: number[];
@@ -54,19 +61,21 @@ export function policyMove(s: State, p: Policy): number {
 }
 // Flat Monte Carlo search: tactical wins first, then terminal rollouts.
 export function winningActions(s: State): number[] {
-  const moves = new Set<number>();
-  for (const line of lines) {
-    if (line.filter((b) => s.boards[b] === s.turn).length !== 2) continue;
-    for (const b of line) {
-      if (s.boards[b] !== 0) continue;
-      const board = s.cells.slice(b * 9, b * 9 + 9);
-      for (const local of lines) {
-        if (local.filter((c) => board[c] === s.turn).length !== 2) continue;
-        for (const c of local) if (board[c] === 0) moves.add(b * 9 + c);
-      }
-    }
-  }
-  return legal(s).filter((a) => moves.has(a));
+  const closable = new Set(
+    s.boards.flatMap((value, b) => {
+      if (value) return [];
+      return [s.turn, 2].some((claim) => {
+        const boards = [...s.boards];
+        boards[b] = claim;
+        return macroResult(boards, s.turn) === s.turn;
+      })
+        ? [b]
+        : [];
+    }),
+  );
+  return legal(s).filter(
+    (a) => closable.has(Math.floor(a / 9)) && play(s, a).winner === s.turn,
+  );
 }
 export function searchMove(
   s: State,

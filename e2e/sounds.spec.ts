@@ -6,7 +6,7 @@ test("single player makes distinct X/O sounds, restarts, and respects persistent
   page,
 }) => {
   await observeAudio(page);
-  await page.goto("/");
+  await page.goto("/practice");
   expect(
     await page.evaluate(
       () => (window as unknown as { audioContexts: number }).audioContexts,
@@ -59,7 +59,7 @@ test("a complete hosted game plays one fanfare for the winner and one woosh for 
     await observeAudio(host);
     await observeAudio(guest);
     await observeAudio(viewer);
-    await host.goto("/");
+    await host.goto("/practice");
     await host.getByText("Relay settings", { exact: true }).click();
     await host.getByLabel("Relay URLs").fill(relay.url);
     await host.getByRole("button", { name: "Host game", exact: true }).click();

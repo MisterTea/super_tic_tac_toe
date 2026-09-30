@@ -1,7 +1,8 @@
 import "./globals.css";
 export const metadata = {
-  title: "Ultimate Relay",
-  description: "Ultimate tic-tac-toe over Nostr and WebRTC",
+  title: "Tic Tac Toe Royale",
+  description:
+    "Sixteen players. Four rounds. One crown. Ultimate tic-tac-toe tournaments.",
   referrer: "no-referrer",
 };
 export default function Layout({ children }: { children: React.ReactNode }) {

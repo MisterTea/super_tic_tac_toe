@@ -1,19 +1,21 @@
 """Player-relative spatial evidence and bounded cognition, mirrored in TypeScript."""
 import math, random
-from game import Game,LINES
+from game import Game,LINES,macro_result
 
 def winning_actions(g):
-    moves=set()
-    for line in LINES:
-        if sum(g.boards[b]==g.turn for b in line)!=2:continue
-        for b in line:
-            if g.boards[b]!=0:continue
-            board=g.cells[b*9:b*9+9]
-            for local in LINES:
-                if sum(board[c]==g.turn for c in local)!=2:continue
-                for c in local:
-                    if board[c]==0:moves.add(b*9+c)
-    return [a for a in g.legal() if a in moves]
+    closable=set()
+    for b,value in enumerate(g.boards):
+        if value:continue
+        for claim in (g.turn,2):
+            boards=g.boards.copy();boards[b]=claim
+            if macro_result(boards,g.turn)==g.turn:closable.add(b)
+    moves=[]
+    for a in g.legal():
+        if a//9 not in closable:continue
+        h=Game(g.cells.copy(),g.boards.copy(),g.turn,g.forced,g.winner,g.moves.copy());h.step(a)
+        if h.winner==g.turn:moves.append(a)
+    return moves
+
 def search_move(g,rng,simulations=700):
     actions=g.legal();wins=winning_actions(g)
     if wins:return wins[0]
@@ -37,7 +39,7 @@ def evidence(g,a,p,focus=None):
     def notice(b):
         c=center(b);return attention(math.hypot(c[0]-f[0],c[1]-f[1]),p)
     local,route=notice(a//9),notice(a%9)
-    ownership=[notice(i) for i,v in enumerate(g.boards) if abs(v)==1]
+    ownership=[notice(i) for i,v in enumerate(g.boards) if v!=0]
     macro=p['macro']*math.prod(ownership)
     return [local,local,local*macro,local*macro,route,route*macro,route,1,local*macro,local,local*macro,local]
 def profile_at(model,skill):
@@ -60,7 +62,7 @@ def move(g,skill,model,rng=random,focus=None):
         if b not in masks:
             c=center(b);masks[b]=int(rng.random()<attention(math.hypot(c[0]-f[0],c[1]-f[1]),p))
         return masks[b]
-    def macro_noticed(t):return int(macro and all(abs(v)!=1 or observed(b)==1 for b,v in enumerate(t.boards)))
+    def macro_noticed(t):return int(macro and all(v==0 or observed(b)==1 for b,v in enumerate(t.boards)))
     def score(t,a):
         local,route=observed(a//9),observed(a%9)
         macro_seen=macro_noticed(t)
@@ -71,7 +73,7 @@ def move(g,skill,model,rng=random,focus=None):
         h=Game(t.cells.copy(),t.boards.copy(),t.turn,t.forced,t.winner,t.moves.copy());h.step(a);return h
     def walk(t,depth):
         nonlocal nodes
-        if t.winner:return 0 if t.winner==2 or not macro_noticed(t) else -1000
+        if t.winner:return 0 if not macro_noticed(t) else 1000 if t.winner==t.turn else -1000
         if depth<=0 or nodes>=400:return 0
         ranked=sorted([(a,score(t,a)) for a in t.legal()],key=lambda x:-x[1])[:max(1,math.floor(p['breadth']+.5))]
         best=-math.inf

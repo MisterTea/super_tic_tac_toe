@@ -13,4 +13,6 @@ public/ai/ort/
 .vercel
 .env*
 !.env.example
+artifacts/
+!.env.example
 production-preview.png

@@ -24,7 +24,7 @@ export class BrowserAI {
       distances: new Tensor("float32", distances, [9]),
       ownership: new Tensor(
         "float32",
-        Float32Array.from(s.boards, (v) => (Math.abs(v) === 1 ? 1 : 0)),
+        Float32Array.from(s.boards, (v) => (v !== 0 ? 1 : 0)),
         [9],
       ),
       noise: new Tensor("float32", noise, [10]),
@@ -37,7 +37,7 @@ export class BrowserAI {
       ),
       terminal: new Tensor(
         "float32",
-        Float32Array.of(s.winner && s.winner !== 2 ? 1 : 0),
+        Float32Array.of(s.winner ? (s.winner === s.turn ? -1 : 1) : 0),
         [1],
       ),
     });

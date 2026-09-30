@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 test("browser WASM graph matches PyTorch at every difficulty", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/practice");
   const rows = JSON.parse(
     readFileSync("e2e/fixtures/browser-policy.json", "utf8"),
   );
