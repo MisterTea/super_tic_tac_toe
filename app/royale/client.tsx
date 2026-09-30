@@ -239,11 +239,12 @@ function Session({ account, daily }: { account: boolean; daily: boolean }) {
     if (session.isPending || session.data) return;
     guestSignIn ||= authClient.signIn
       .anonymous()
-      .then((result) => {
+      .then(async (result) => {
         if (result.error)
           throw new Error(
             result.error.message || "Could not create guest session",
           );
+        await session.refetch();
       })
       .finally(() => {
         guestSignIn = undefined;
@@ -982,13 +983,12 @@ function Arena({ guest }: { guest: boolean }) {
                   enabled={canPlay}
                   onMove={(action) =>
                     void act(async () => {
-                      const response = await move({
+                      await move({
                         tournament: t.id!,
                         match: match.id,
                         seq: match.state.moves.length,
                         action,
                       });
-                      if (response.error) throw new Error(response.error);
                     })
                   }
                 />
@@ -1019,7 +1019,7 @@ function Arena({ guest }: { guest: boolean }) {
               <button
                 className="secondary"
                 disabled={pending}
-                onClick={() => void act(() => resign({}))}
+                onClick={() => void act(() => resign({ tournament: t.id! }))}
               >
                 {waiting ? "Withdraw from tournament" : "Resign match"}
               </button>

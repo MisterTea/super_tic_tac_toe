@@ -308,6 +308,8 @@ export async function driveBots(tournamentId: string, version: number) {
 
 export async function ensureProfile(authId: string, isAnonymous = false) {
   return withTransaction(async (client) => {
+    // Serialize first visits for this account before checking for a profile.
+    await client.query('SELECT id FROM "user" WHERE id = $1 FOR UPDATE', [authId]);
     const existingRes = await client.query(
       "SELECT * FROM profiles WHERE auth_id = $1",
       [authId],
@@ -667,7 +669,7 @@ export async function move(
     if (m.status !== "playing") {
       throw new ApiError("This match is not accepting moves.");
     }
-    if (m.state.turn !== (m.players[0] === p.id ? 1 : 2)) {
+    if (m.state.turn !== (m.players[0] === p.id ? 1 : -1)) {
       throw new ApiError("It is not your turn.");
     }
     if (m.state.moves.length !== seq) {
