@@ -728,6 +728,7 @@ progress {
   align-items: start;
 }
 .royale-card {
+  min-width: 0;
   background: linear-gradient(130deg, #1d271e, #161e19);
   border: 1px solid #344036;
   border-radius: 16px;
@@ -1058,7 +1059,7 @@ progress {
 }
 @media (max-width: 800px) {
   .royale-workspace {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .quest-grid {
     grid-template-columns: 1fr;
