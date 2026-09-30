@@ -2,7 +2,7 @@
 
 Royale uses an authoritative backend powered by Neon PostgreSQL and Next.js server endpoints. The frontend subscribes to a saved guest profile, a shared rank-tier lobby, and its tournament via polling and mutation invalidations. The home page offers Royale plus a Single game section. Its computer and host links open `/practice?mode=computer` and `/practice?mode=host` directly; private invites remain at `/practice?code=…`. Random matchmaking is no longer offered.
 
-Live site: https://super-tic-tac-toe-royale.vercel.app. Guest play and Sign in with Vercel are enabled. See [telemetry and OAuth operations](TELEMETRY.md).
+Live site: https://boxed.games. Guest play is enabled. Player accounts support username/password and optional Google sign-in. See [telemetry and OAuth operations](TELEMETRY.md).
 
 Play starts as a guest without a login requirement. The main page offers optional login; after a guest's first Royale result, a dismissible popover encourages saving progress across devices. The prompt is shown once per guest profile in the browser. Login is available again after active participation ends.
 
@@ -15,9 +15,9 @@ The public `/leaderboard` page and home page show up to ten signed-in accounts o
 1. Run `npm install`.
 2. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to your Neon PostgreSQL connection string (with `?sslmode=require`). Use the current, rotated password. `.env` and `.env.local` are ignored by Git; never commit credentials. There is no database credential fallback in source code.
 3. Set `BETTER_AUTH_SECRET` (at least 32 random characters) and `SITE_URL` / `TRUSTED_ORIGINS`.
-4. Tables and schemas are automatically created and initialized on server startup via `initDb()` in `lib/db.ts`.
+4. Initialize tables with `initDb()` in `lib/db.ts` when setting up a new database. Run `npm run migrate:auth` against an existing database before deploying username accounts.
 5. Run `npm run dev`. Guests authenticate automatically and retain their session in the browser's secure session cookie. Clearing cookies loses guest access; linked accounts can recover across devices.
-6. Account saving uses Sign in with Vercel. Configure `VERCEL_CLIENT_ID` and `VERCEL_CLIENT_SECRET` in `.env.local` and register `/api/auth/callback/vercel` on the OAuth app. Linking and sign-out are blocked during active participation. The backend also supports optional Google OAuth credentials.
+6. Account saving supports username/password registration and login without an OAuth provider. To also offer Google, configure `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` and register `/api/auth/callback/google` on the Google OAuth client. Linking and sign-out are blocked during active participation.
 
 ## Deploy
 

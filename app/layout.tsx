@@ -1,6 +1,6 @@
 import "./globals.css";
 export const metadata = {
-  metadataBase: new URL("https://super-tic-tac-toe-royale.vercel.app"),
+  metadataBase: new URL("https://boxed.games"),
   title: "Tic Tac Toe Royale",
   description:
     "Sixteen players. Four rounds. One crown. Ultimate tic-tac-toe tournaments.",

@@ -1,4 +1,5 @@
 "use client";
+import { AccountLogin } from "./account-login";
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ConvexReactClient,
@@ -69,6 +70,10 @@ function Shell({ children }: { children: ReactNode }) {
       <footer>
         16 ENTER. ONE TAKES THE CROWN.
         <span>Think ahead. Survive the bracket.</span>
+        <nav className="legal-links" aria-label="Legal">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Service</a>
+        </nav>
       </footer>
     </main>
   );
@@ -197,7 +202,7 @@ function GuestLoginPrompt({
         guest progress comes with you.
       </p>
       <button className="primary" disabled={pending} onClick={onLogin}>
-        Log in with Vercel
+        Log in
       </button>
       <button
         className="secondary"
@@ -363,21 +368,12 @@ function Account({ guest }: { guest: boolean }) {
               Log in to change your player name and save your rank, crowns, and
               collection across devices. Your guest progress comes with you.
             </p>
-            <button
-              className="primary"
-              disabled={pending || !!p.active || !providers?.vercel}
-              onClick={() =>
-                void act(async () => {
-                  const response = await authClient.signIn.social({
-                    provider: "vercel",
-                    callbackURL: `${location.origin}/account`,
-                  });
-                  if (response.error) throw new Error(response.error.message);
-                })
-              }
-            >
-              Log in with Vercel
-            </button>
+            <AccountLogin
+              google={!!providers?.google}
+              pending={pending}
+              active={!!p.active}
+              act={act}
+            />
             {p.active ? <p>Finish your tournament to log in.</p> : null}
             <p>
               You can always <a href="/">keep playing as a guest</a>.
@@ -521,7 +517,6 @@ function Arena({ guest }: { guest: boolean }) {
   const host = useMutation(api.growth.host),
     start = useMutation(api.growth.start);
   const data = useQuery(api.royale.dashboard, {});
-  const providers = useQuery(api.auth.providers, {});
   const join = useMutation(api.royale.join),
     leave = useMutation(api.royale.leaveLobby),
     move = useMutation(api.royale.move),
@@ -630,14 +625,7 @@ function Arena({ guest }: { guest: boolean }) {
     cosmetics.find((c) => c.id === p.equipped.title)?.name || "Challenger";
   const effect =
     cosmetics.find((c) => c.id === p.equipped.effect)?.name || "Crown";
-  const login = () =>
-    void act(async () => {
-      const response = await authClient.signIn.social({
-        provider: "vercel",
-        callbackURL: location.origin,
-      });
-      if (response.error) throw new Error(response.error.message);
-    });
+  const login = () => location.assign("/account");
   return (
     <Shell>
       <div className="player-strip">
@@ -657,7 +645,7 @@ function Arena({ guest }: { guest: boolean }) {
         {guest ? (
           <button
             className="secondary login-button"
-            disabled={pending || !!p.active || !providers?.vercel}
+            disabled={pending || !!p.active}
             title={
               p.active
                 ? "Finish your tournament to log in"
@@ -679,11 +667,7 @@ function Arena({ guest }: { guest: boolean }) {
           Sound {soundOn ? "on" : "off"}
         </button>
       </div>
-      {guest &&
-      finished &&
-      data.history.length === 1 &&
-      !p.active &&
-      providers?.vercel ? (
+      {guest && finished && data.history.length === 1 && !p.active ? (
         <GuestLoginPrompt profileId={p._id} pending={pending} onLogin={login} />
       ) : null}
       {error ? (

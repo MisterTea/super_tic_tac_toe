@@ -1,4 +1,9 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
+import {
+  Pool,
+  type PoolClient,
+  type QueryResult,
+  type QueryResultRow,
+} from "pg";
 
 let poolInstance: Pool | null = null;
 
@@ -53,12 +58,18 @@ export async function initDb() {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
+        username TEXT,
+        "displayUsername" TEXT,
         "emailVerified" BOOLEAN NOT NULL DEFAULT false,
         image TEXT,
         "createdAt" TIMESTAMPTZ NOT NULL,
         "updatedAt" TIMESTAMPTZ NOT NULL,
         "isAnonymous" BOOLEAN DEFAULT false
       );
+
+      ALTER TABLE "user" ADD COLUMN IF NOT EXISTS username TEXT;
+      ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "displayUsername" TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS user_username_unique ON "user" (username);
 
       CREATE TABLE IF NOT EXISTS "session" (
         id TEXT PRIMARY KEY,

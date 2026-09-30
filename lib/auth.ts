@@ -1,7 +1,13 @@
 import { betterAuth } from "better-auth";
-import { anonymous } from "better-auth/plugins";
+import { anonymous, username } from "better-auth/plugins";
 import { pool } from "./db";
 import { linkProfiles } from "./backend/royale";
+
+if (process.env.NODE_ENV === "production" && !process.env.BETTER_AUTH_SECRET) {
+  throw new Error(
+    "BETTER_AUTH_SECRET is required for production authentication.",
+  );
+}
 
 export const auth = betterAuth({
   baseURL:
@@ -12,6 +18,11 @@ export const auth = betterAuth({
     process.env.BETTER_AUTH_SECRET ||
     "f98a287cd4e910248467bb98e54736f8a20d43c8b16e492f8011246985a49c31",
   database: pool,
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    maxPasswordLength: 128,
+  },
   session: { expiresIn: 60 * 60 * 24 * 365, updateAge: 60 * 60 * 24 },
   trustedOrigins: (
     process.env.TRUSTED_ORIGINS ||
@@ -38,6 +49,10 @@ export const auth = betterAuth({
       : {}),
   },
   plugins: [
+    username({
+      maxUsernameLength: 24,
+      usernameValidator: (value) => /^[A-Za-z0-9_]+$/.test(value),
+    }),
     anonymous({
       disableDeleteAnonymousUser: true,
       onLinkAccount: async ({ anonymousUser, newUser }) => {

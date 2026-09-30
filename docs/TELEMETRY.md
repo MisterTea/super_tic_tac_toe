@@ -12,10 +12,20 @@ The public `telemetry:publicStats` query returns only `{ players, games, crowns 
 
 Read the private admin report via `telemetry:report`. It returns lifetime totals and the most recent 30 daily buckets (maximum 90). Missing counters are zero; averages with no samples are null. Gameplay can continue without a browser open, so CPU and completion metrics continue updating on the server.
 
-## OAuth
+## Player accounts
 
-Sign in with Vercel uses Better Auth's built-in Vercel provider and PKCE, with identity-only `email`/`profile` scopes. The OAuth app is `tic-tac-toe-royale-aquinas`. Its production callbacks follow the linked Vercel project at `/api/auth/callback/vercel`; development permits `http://localhost:3000/api/auth/callback/vercel`.
+Players can create an account with a username, email, and password, then log in with either their username or email. Usernames are case-insensitive and use 3–24 letters, numbers, or underscores. Better Auth hashes passwords; they are never stored as plaintext. Google is the optional social sign-in option on the account screen. Vercel OAuth remains supported by the backend for existing integrations but is not offered in the player UI.
 
-Set `VERCEL_CLIENT_ID` and `VERCEL_CLIENT_SECRET` in environment variables, never as public frontend variables. Guest progress links into the signed-in account through the existing server-side merge. Sign-in and sign-out are blocked during tournament participation. Optional Google credentials remain supported by the backend.
+Run `npm run migrate:auth` once against each existing database before deploying this change. It adds nullable username/displayUsername fields and a unique username index without modifying existing users or progress. `initDb()` includes the same changes for database initialization. Set `BETTER_AUTH_SECRET` to a private random value of at least 32 characters; production authentication requires it. Changing an existing signing secret invalidates browser sessions, so plan that change before launch.
+
+For Google sign-in:
+
+1. In Google Cloud, configure the OAuth consent screen for an external web application. Enable access for intended players (testing mode is limited to configured test users).
+2. Create an OAuth client of type **Web application**. Add `https://boxed.games` as an authorized JavaScript origin and `https://boxed.games/api/auth/callback/google` as an authorized redirect URI. For development, also register `http://localhost:3000/api/auth/callback/google`.
+3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the hosting project's production environment. Keep the secret server-only.
+4. Set `BETTER_AUTH_URL` and `SITE_URL` to `https://boxed.games` and include that origin in `TRUSTED_ORIGINS`.
+5. Redeploy. Verify Google consent returns to the account screen and guest progress is retained.
+
+Guest progress links into the signed-in account through the server-side merge for both registration and login. Sign-in and sign-out are blocked during tournament participation. Password reset and email verification delivery are not configured yet; adding them requires an email provider.
 
 Growth metrics include firstMatchesCompleted (first settled match per profile), firstMatchesPlayedThrough (excluding clock loss or resignation), with campaign-level counts in the private growth:report function and campaignMetrics table. These counters were introduced with the growth update and don't retroactively reconstruct historical acquisition sources. Campaign labels are browser supplied, sanitized, and bounded; they are not trusted gameplay data.

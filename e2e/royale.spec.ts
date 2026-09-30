@@ -222,10 +222,6 @@ test("guest lobby warms up, fills with CPUs, starts, and restores after refresh"
   await expect(
     page.getByRole("button", { name: "Log in", exact: true }),
   ).toBeVisible({ timeout: 15_000 });
-  const providers = await page.request.post("/api/rpc", {
-    data: { name: "auth.providers", args: {} },
-  });
-  const hasLogin = !!(await providers.json()).result.vercel;
   await expect(
     page.getByRole("dialog", { name: "Keep your progress with you." }),
   ).not.toBeVisible();
@@ -296,10 +292,10 @@ test("guest lobby warms up, fills with CPUs, starts, and restores after refresh"
   const prompt = page.getByRole("dialog", {
     name: "Keep your progress with you.",
   });
-  if (hasLogin) {
+  {
     await expect(prompt).toBeVisible();
     await expect(
-      prompt.getByRole("button", { name: "Log in with Vercel", exact: true }),
+      prompt.getByRole("button", { name: "Log in", exact: true }),
     ).toBeEnabled();
     await page.locator(".player-strip").scrollIntoViewIfNeeded();
     await page.screenshot({

@@ -8,6 +8,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "migrate:auth": "tsx scripts/migrate-auth.ts",
     "test": "tsx --test tests/game.test.ts tests/skill.test.ts tests/timing.test.ts tests/royale.test.ts && vitest run tests/royale-sync.test.ts",
     "test:backend": "vitest run tests/backend.test.ts",
     "test:parity": "tsx --test tests/parity.test.ts tests/policy.test.ts tests/skill-parity.test.ts",
