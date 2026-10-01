@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { initDb, query, getPool } from "../lib/db";
+import { initDb, query, getPool, withTransaction } from "../lib/db";
 import * as royale from "../lib/backend/royale";
 import * as leaderboard from "../lib/backend/leaderboard";
 import * as daily from "../lib/backend/daily";
@@ -261,11 +261,7 @@ describe("Neon PostgreSQL authoritative Royale backend", () => {
       "board victory",
       Date.now(),
     );
-    await query("UPDATE tournaments SET state = $1, status = $2 WHERE id = $3", [
-      JSON.stringify(state),
-      state.status,
-      id,
-    ]);
+    await withTransaction((client) => royale.save(client, id, state, Date.now()));
 
     await royale.driveBots(id, state.version);
     await royale.driveBots(id, state.version + 1);

@@ -7,6 +7,7 @@ import {
   useConvexAuth,
   useMutation,
   useQuery,
+  useConnectionStatus,
   ConvexBetterAuthProvider,
   ConvexError,
   api,
@@ -506,6 +507,7 @@ function Account({ guest }: { guest: boolean }) {
   );
 }
 function Arena({ guest }: { guest: boolean }) {
+  const connectionRetrying = useConnectionStatus();
   const [invitation, setInvitation] = useState<string | null>(null);
   useEffect(() => {
     setInvitation(new URLSearchParams(location.search).get("room"));
@@ -667,6 +669,11 @@ function Arena({ guest }: { guest: boolean }) {
           Sound {soundOn ? "on" : "off"}
         </button>
       </div>
+      {connectionRetrying ? (
+        <p className="royale-error" role="status">
+          Connection interrupted. Reconnecting to your saved game…
+        </p>
+      ) : null}
       {guest && finished && data.history.length === 1 && !p.active ? (
         <GuestLoginPrompt profileId={p._id} pending={pending} onLogin={login} />
       ) : null}

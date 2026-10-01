@@ -20,6 +20,8 @@ export function getPool(): Pool {
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
+      query_timeout: 12000,
+      application_name: "tic-tac-toe-royale",
     });
   }
   return poolInstance;
@@ -37,17 +39,45 @@ export async function query<R extends QueryResultRow = any>(
 export async function withTransaction<T>(
   callback: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const result = await callback(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
+  for (let attempt = 0; ; attempt++) {
+    const client = await getPool().connect();
+    const started = Date.now();
+    let retry = false;
+    let broken: Error | undefined;
+    try {
+      await client.query("BEGIN");
+      // SET LOCAL also works through Neon transaction pooling.
+      await client.query(
+        "SET LOCAL statement_timeout = '10s'; SET LOCAL lock_timeout = '3s'; SET LOCAL idle_in_transaction_session_timeout = '15s'",
+      );
+      const result = await callback(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        broken = rollbackError as Error;
+      }
+      const code = (error as { code?: string }).code;
+      retry = !broken && attempt < 2 && (code === "40P01" || code === "40001");
+      console.error("[db] transaction_failed", {
+        code: code || "UNKNOWN",
+        elapsedMs: Date.now() - started,
+        retry,
+      });
+      if (!retry) throw error;
+    } finally {
+      client.release(broken);
+      if (Date.now() - started > 2000)
+        console.warn("[db] slow_transaction", {
+          elapsedMs: Date.now() - started,
+        });
+    }
+    if (retry)
+      await new Promise((resolve) =>
+        setTimeout(resolve, 25 + Math.random() * 50),
+      );
   }
 }
 

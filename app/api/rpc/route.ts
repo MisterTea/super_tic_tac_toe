@@ -99,15 +99,45 @@ async function handleRpc(name: string, args: any, request: Request) {
   }
 }
 
+async function loggedRpc(name: string, args: any, request: Request) {
+  const started = Date.now();
+  const action =
+    typeof name === "string" && /^[a-z.]{1,64}$/i.test(name) ? name : "unknown";
+  try {
+    return await handleRpc(name, args, request);
+  } catch (error) {
+    if (!(error instanceof royale.ApiError))
+      console.error("[rpc] failed", {
+        action,
+        code: (error as { code?: string }).code || "UNKNOWN",
+        elapsedMs: Date.now() - started,
+      });
+    throw error;
+  } finally {
+    if (Date.now() - started > 2000)
+      console.warn("[rpc] slow_request", {
+        action,
+        elapsedMs: Date.now() - started,
+      });
+  }
+}
+function rpcError(error: unknown) {
+  const expected = error instanceof royale.ApiError;
+  const message = expected
+    ? error.message
+    : "Connection interrupted. Please try again.";
+  return Response.json(
+    { error: message, data: expected ? error.data : message },
+    { status: expected ? 400 : 503 },
+  );
+}
 export async function POST(request: Request) {
   try {
     const { name, args } = await request.json();
-    const result = await handleRpc(name, args, request);
+    const result = await loggedRpc(name, args, request);
     return Response.json({ result });
   } catch (error: any) {
-    const message = error?.message || "Internal error";
-    const data = error?.data || message;
-    return Response.json({ error: message, data }, { status: 400 });
+    return rpcError(error);
   }
 }
 
@@ -117,11 +147,9 @@ export async function GET(request: Request) {
     const name = searchParams.get("name") || "";
     const rawArgs = searchParams.get("args");
     const args = rawArgs ? JSON.parse(rawArgs) : {};
-    const result = await handleRpc(name, args, request);
+    const result = await loggedRpc(name, args, request);
     return Response.json({ result });
   } catch (error: any) {
-    const message = error?.message || "Internal error";
-    const data = error?.data || message;
-    return Response.json({ error: message, data }, { status: 400 });
+    return rpcError(error);
   }
 }

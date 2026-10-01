@@ -246,12 +246,19 @@ export async function save(
 export function scheduleBotDrive(id: string, version: number, delayMs: number) {
   const existing = wakeTimers.get(id);
   if (existing) clearTimeout(existing);
-  const timer = setTimeout(() => {
-    wakeTimers.delete(id);
-    void driveBots(id, version).catch(() => {
-      scheduleBotDrive(id, version, 1000);
-    });
-  }, Math.min(delayMs, 2147483647));
+  const timer = setTimeout(
+    () => {
+      wakeTimers.delete(id);
+      void driveBots(id, version).catch((error) => {
+        console.error("[royale] bot_drive_failed", {
+          tournament: id,
+          code: error?.code || "UNKNOWN",
+        });
+        scheduleBotDrive(id, version, 1000);
+      });
+    },
+    Math.min(delayMs, 2147483647),
+  );
   wakeTimers.set(id, timer);
 }
 
@@ -493,33 +500,18 @@ export async function join(authId: string, roomCode?: string) {
     if (p.active) {
       if (roomCode) {
         const activeT = (
-          await client.query("SELECT room_code FROM tournaments WHERE id = $1", [
-            p.active,
-          ])
+          await client.query(
+            "SELECT room_code FROM tournaments WHERE id = $1",
+            [p.active],
+          )
         ).rows[0];
         if (activeT?.room_code !== roomCode) {
-          throw new ApiError("Leave your current lobby or finish your Royale first.");
+          throw new ApiError(
+            "Leave your current lobby or finish your Royale first.",
+          );
         }
       }
       return p.active;
-    }
-
-    await activity(client, p, now);
-
-    if (p.last) {
-      const last = (
-        await client.query(
-          "SELECT created_at FROM rewards WHERE profile = $1 AND tournament = $2",
-          [p.id, p.last],
-        )
-      ).rows[0];
-      if (last && now - Number(last.created_at) < 120_000) {
-        await recordEvent(client, {
-          kind: "immediate_requeue",
-          at: now,
-          value: now - Number(last.created_at),
-        });
-      }
     }
 
     const tier = tierIndex(p.points);
@@ -544,8 +536,10 @@ export async function join(authId: string, roomCode?: string) {
     } else {
       const candidates = (
         await client.query(
-          "SELECT * FROM tournaments WHERE status = 'lobby' AND tier = $1 AND room_code IS NULL FOR UPDATE",
-          [tier],
+          `SELECT * FROM tournaments WHERE status = 'lobby' AND tier = $1 AND room_code IS NULL
+           AND (state->>'closesAt')::bigint > $2 AND jsonb_array_length(state->'entrants') < 16
+           ORDER BY updated_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+          [tier, now],
         )
       ).rows;
       roomRow = candidates.find(
@@ -581,11 +575,32 @@ export async function join(authId: string, roomCode?: string) {
         wins: 0,
         boards: 0,
       });
-      await client.query("UPDATE profiles SET active = $1, last = $1 WHERE id = $2", [
-        roomRow.id,
-        p.id,
-      ]);
-      await recordEvent(client, { kind: "join", tournament: roomRow.id, at: now });
+      await client.query(
+        "UPDATE profiles SET active = $1, last = $1 WHERE id = $2",
+        [roomRow.id, p.id],
+      );
+      // Gameplay rows must be locked before shared telemetry rows, matching
+      // save/driveBots. Requeue used to invert that order and deadlock.
+      await activity(client, p, now);
+      if (p.last) {
+        const last = (
+          await client.query(
+            "SELECT created_at FROM rewards WHERE profile = $1 AND tournament = $2",
+            [p.id, p.last],
+          )
+        ).rows[0];
+        if (last && now - Number(last.created_at) < 120_000)
+          await recordEvent(client, {
+            kind: "immediate_requeue",
+            at: now,
+            value: now - Number(last.created_at),
+          });
+      }
+      await recordEvent(client, {
+        kind: "join",
+        tournament: roomRow.id,
+        at: now,
+      });
       if (p.acquisition) {
         await recordEvent(client, {
           kind: `source_join:${p.acquisition.source}:${p.acquisition.campaign}`,

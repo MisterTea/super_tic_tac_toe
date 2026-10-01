@@ -9,14 +9,8 @@ import React, {
 } from "react";
 import { authClient } from "./auth-client";
 
-export class ConvexError extends Error {
-  data: any;
-  constructor(data: any) {
-    super(typeof data === "string" ? data : JSON.stringify(data));
-    this.name = "ConvexError";
-    this.data = data;
-  }
-}
+import { callRpc, ConvexError } from "./rpc";
+export { callRpc, ConvexError } from "./rpc";
 
 export const api = {
   royale: {
@@ -64,19 +58,21 @@ function notifyQueryListeners() {
     listener();
   }
 }
-
-export async function callRpc(name: string, args: any = {}) {
-  const res = await fetch("/api/rpc", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, args }),
-    credentials: "same-origin",
-  });
-  const data = await res.json().catch(() => ({ error: "Network error" }));
-  if (!res.ok) {
-    throw new ConvexError(data?.data || data?.error || "Error");
-  }
-  return data.result;
+const connectionListeners = new Set<(retrying: boolean) => void>();
+let connectionRetrying = false;
+function connectionState(retrying: boolean) {
+  connectionRetrying = retrying;
+  for (const listener of connectionListeners) listener(retrying);
+}
+export function useConnectionStatus() {
+  const [retrying, setRetrying] = useState(connectionRetrying);
+  useEffect(() => {
+    connectionListeners.add(setRetrying);
+    return () => {
+      connectionListeners.delete(setRetrying);
+    };
+  }, []);
+  return retrying;
 }
 
 export class ConvexHttpClient {
@@ -211,6 +207,7 @@ export function useQuery(fnName: string, args: any = {}) {
           argsJson ? JSON.parse(argsJson) : {},
         );
         if (alive && started === invalidation) {
+          if (fnName === "royale.dashboard") connectionState(false);
           setData((current: any) => {
             if (
               fnName === "royale.dashboard" &&
@@ -222,6 +219,7 @@ export function useQuery(fnName: string, args: any = {}) {
           });
         }
       } catch {
+        if (alive && fnName === "royale.dashboard") connectionState(true);
         // Preserve the last confirmed state during transient network failures.
       } finally {
         inFlight = false;
