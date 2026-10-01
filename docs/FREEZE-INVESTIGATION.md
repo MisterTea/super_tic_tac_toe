@@ -78,6 +78,34 @@ concurrency limits. The reproduced deadlock and missing client deadline are
 confirmed defects; production logs should be monitored after deployment for
 additional independent sources of stalls.
 
+## Background window checks
+
+`e2e/background-freeze.spec.ts` launches a real Chromium window, minimizes it,
+asserts `document.visibilityState === 'hidden'`, and explicitly freezes and
+resumes its lifecycle. The smoke test verifies actual document `freeze`/`resume`
+events. Normal background throttling is enabled. Playwright's usual forced-focus
+override is disabled through [CDP's `noDefaults` connection option](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp);
+foreground focus is emulated only after restoring the window because Windows
+can refuse focus while another desktop app is active.
+
+The following checks passed:
+
+- Freeze during ONNX/WASM loading, resume, then complete a legal computer turn.
+- Three difficulty-10 computer games with two freeze/resume cycles per game:
+  controls recovered after every turn, model loaded only once, no JavaScript
+  errors.
+- Hold a Royale hosting action while the window is frozen for 16 seconds,
+  exceeding its RPC deadline. Controls released 89 ms after return, with the
+  timeout message visible.
+- Freeze an active Royale for 18 seconds. Its server-side clock still settled
+  the match while the browser was frozen; the result synchronized 131 ms after
+  return, and the same player could host another game.
+
+These checks did not reproduce a persistent WASM lock. Browser WASM is used by
+the explicit computer mode; Royale CPU turns run on the server. These are local
+Chromium checks, not coverage of every mobile browser or operating-system sleep
+behavior.
+
 ## Reproduce safely
 
 The stress scripts refuse any database URL other than the disposable local
@@ -92,6 +120,7 @@ npm test
 npm run test:backend
 $env:E2E_BASE_URL='http://127.0.0.1:3100'
 npx playwright test e2e/freeze-stress.spec.ts
+npx playwright test e2e/background-freeze.spec.ts
 ```
 
 `test:backend` clears its database between tests. Never point it at production.
