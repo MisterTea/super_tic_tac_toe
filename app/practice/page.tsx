@@ -2,11 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { initial, legal, winningLine, play } from "../../lib/game";
 import { Network, SessionInfo } from "../../lib/network";
-import { remainingSeconds } from "../../lib/timing";
+import { remainingSeconds, MOVE_ROUTING_MS } from "../../lib/timing";
 import type { BrowserAI } from "../../lib/browser-ai";
 import { GameSounds } from "../../lib/sounds";
 import StatHeader from "../stat-header";
 import FeedbackButton from "../feedback-button";
+import BoardEffects from "../royale/board-effects";
 type Mode = "choose" | "ai" | "online";
 const emptyInfo: SessionInfo = {
   winner: 0,
@@ -28,6 +29,7 @@ export default function Home() {
     [relays, setRelays] = useState("wss://relay.damus.io,wss://nos.lol"),
     [now, setNow] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
+  const [preview, setPreview] = useState<number | null>(null);
   const sounds = useRef<GameSounds | null>(null);
   const soundState = useRef({ moves: [] as number[], winner: 0 });
   const boardRef = useRef<HTMLDivElement | null>(null);
@@ -213,8 +215,10 @@ export default function Home() {
     const started = generation.current;
     const stale = () => cancelled || started !== generation.current;
     const id = setTimeout(() => {
-      void ai
-        .move(s, difficulty / 10, stale)
+      void import("../../lib/browser-ai")
+        .then(({ difficultyToSkill }) =>
+          ai.move(s, difficultyToSkill(difficulty), stale),
+        )
         .then((action) => {
           if (!stale()) {
             setS(play(s, action));
@@ -227,7 +231,7 @@ export default function Home() {
               `Computer move failed: ${e instanceof Error ? e.message : String(e)}. Use New Game to retry.`,
             );
         });
-    }, 60);
+    }, MOVE_ROUTING_MS);
     return () => {
       cancelled = true;
       clearTimeout(id);
@@ -412,6 +416,10 @@ export default function Home() {
                           a === lastMove ? "Most recent move" : undefined
                         }
                         disabled={!canPlay || !allowed.includes(a)}
+                        onPointerEnter={() => setPreview(a)}
+                        onPointerLeave={() => setPreview(null)}
+                        onFocus={() => setPreview(a)}
+                        onBlur={() => setPreview(null)}
                         onClick={() => {
                           try {
                             if (online) network.current!.move(a);
@@ -452,6 +460,25 @@ export default function Home() {
                   />
                 </svg>
               )}
+              <BoardEffects
+                state={s}
+                preview={
+                  canPlay && preview !== null && allowed.includes(preview)
+                    ? preview
+                    : null
+                }
+                result={
+                  outcome
+                    ? outcome === 2
+                      ? "Draw"
+                      : side === 0
+                        ? `${outcome === 1 ? "X" : "O"} wins`
+                        : outcome === side
+                          ? "Victory"
+                          : "Defeat"
+                    : undefined
+                }
+              />
             </div>
             <p className="hint">
               {info.ended

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { initial, legal, play } from "../lib/game";
 import { searchMove } from "../lib/ai";
+import { difficultyToSkill } from "../lib/browser-ai";
 import {
   attention,
   evidence,
@@ -14,6 +15,22 @@ import {
 const model: SkillModel = JSON.parse(
   readFileSync("public/skill-policy.json", "utf8"),
 );
+
+test("UI difficulty spans skill 0.5 through 1 in equal steps", () => {
+  assert.equal(difficultyToSkill(1), 0.5);
+  assert.equal(difficultyToSkill(10), 1);
+  for (let difficulty = 2; difficulty <= 10; difficulty++) {
+    assert(
+      Math.abs(
+        difficultyToSkill(difficulty) -
+          difficultyToSkill(difficulty - 1) -
+          1 / 18,
+      ) < 1e-12,
+    );
+  }
+  for (const invalid of [0, 11, 1.5, NaN])
+    assert.throws(() => difficultyToSkill(invalid));
+});
 test("skill zero is exactly uniform over legal moves", () => {
   const s = play(initial(), 40),
     a = legal(s);

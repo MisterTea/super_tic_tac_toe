@@ -4,7 +4,7 @@ import { boardCenter, fixation } from "./skill";
 export const difficultyToSkill = (difficulty: number) => {
   if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 10)
     throw new Error("Difficulty must be 1–10");
-  return difficulty / 10;
+  return 0.5 + (difficulty - 1) / 18;
 };
 export class BrowserAI {
   constructor(private session: InferenceSession) {}

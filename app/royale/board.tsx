@@ -1,24 +1,29 @@
 "use client";
 import { legal, type State } from "../../lib/game";
+import { useState } from "react";
+import BoardEffects from "./board-effects";
 
 export default function Board({
   state,
   enabled = false,
   onMove,
   label = "Game board",
+  result,
 }: {
   state: State;
   enabled?: boolean;
   onMove?: (action: number) => void;
   label?: string;
+  result?: string;
 }) {
   const allowed = new Set(legal(state));
+  const [preview, setPreview] = useState<number | null>(null);
   return (
     <div className="board" role="group" aria-label={label}>
       {state.boards.map((won, b) => (
         <div
           key={b}
-          className={`small ${won ? "closed" : ""} ${!won && (state.forced === -1 || state.forced === b) ? "eligible" : ""}`}
+          className={`small ${won ? "closed" : ""} ${!state.winner && !won && (state.forced === -1 || state.forced === b) ? "eligible" : ""}`}
         >
           {Array.from({ length: 9 }, (_, c) => {
             const a = b * 9 + c,
@@ -30,6 +35,10 @@ export default function Board({
                 className={`${v === -1 ? "o" : ""} ${state.moves.at(-1) === a ? "last-move" : ""}`}
                 disabled={!enabled || !allowed.has(a)}
                 onClick={() => onMove?.(a)}
+                onPointerEnter={() => setPreview(a)}
+                onPointerLeave={() => setPreview(null)}
+                onFocus={() => setPreview(a)}
+                onBlur={() => setPreview(null)}
               >
                 {v === 1 ? "✕" : v === -1 ? "◯" : ""}
               </button>
@@ -47,6 +56,13 @@ export default function Board({
           ) : null}
         </div>
       ))}
+      <BoardEffects
+        state={state}
+        preview={
+          enabled && preview !== null && allowed.has(preview) ? preview : null
+        }
+        result={result}
+      />
     </div>
   );
 }

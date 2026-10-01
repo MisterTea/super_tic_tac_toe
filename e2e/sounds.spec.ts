@@ -89,6 +89,8 @@ test("a complete hosted game plays one fanfare for the winner and one woosh for 
     }
     await expect(host.locator(".score")).toContainText("You win");
     await expect(guest.locator(".score")).toContainText("You lose");
+    await expect(host.locator(".board-result")).toHaveText("Victory");
+    await expect(guest.locator(".board-result")).toHaveText("Defeat");
     for (const page of [host, guest]) {
       await expect(
         page.getByRole("img", {

@@ -108,9 +108,148 @@ p {
   color: var(--lime);
 }
 .board {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+}
+.board-effects,
+.move-routing,
+.move-routing svg,
+.board-result {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.board-effects {
+  z-index: 4;
+}
+.move-routing {
+  animation: routing-fade 1.2s both;
+}
+.move-routing.preview {
+  animation: none;
+}
+.move-routing.preview path,
+.move-routing.preview rect {
+  animation: none;
+}
+.move-routing.routing-obscured {
+  visibility: hidden;
+}
+.move-routing svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.move-routing path {
+  fill: none;
+  stroke: var(--lime);
+  stroke-width: 3;
+  stroke-dasharray: 1;
+  animation: routing-trail 0.55s ease-out both;
+}
+.move-routing rect {
+  fill: #b9ec6b18;
+  stroke: var(--lime);
+  stroke-width: 3;
+  animation: routing-pulse 0.65s 0.35s ease-out both;
+}
+.routing-caption {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--lime);
+  border-radius: 20px;
+  background: #101612;
+  color: var(--lime);
+  font-size: 11px;
+  text-align: center;
+}
+.board-result {
+  display: grid;
+  place-items: center;
+  background: #10161266;
+  border-radius: 8px;
+  animation: result-shade 0.7s ease-out both;
+}
+.board-result span {
+  max-width: calc(100% - 24px);
+  text-align: center;
+  overflow-wrap: anywhere;
+  padding: 12px 24px;
+  color: var(--lime);
+  background: #101612e6;
+  border: 2px solid currentColor;
+  border-radius: 10px;
+  font-size: clamp(28px, 7vw, 64px);
+  font-weight: 700;
+  box-shadow: 0 0 50px #b9ec6b40;
+  animation: result-arrival 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.board-result.defeat span {
+  color: var(--orange);
+  box-shadow: 0 0 50px #f9a66c30;
+}
+@keyframes routing-trail {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes routing-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.4;
+  }
+  50% {
+    stroke-opacity: 1;
+    fill: #b9ec6b44;
+  }
+}
+@keyframes routing-fade {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes result-arrival {
+  from {
+    opacity: 0;
+    transform: scale(0.65) translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes result-shade {
+  from {
+    background: transparent;
+  }
+  to {
+    background: #10161266;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .move-routing path,
+  .move-routing rect,
+  .board-result,
+  .board-result span {
+    animation: none;
+  }
+  .move-routing {
+    animation-timing-function: steps(1, end);
+  }
 }
 .small {
   position: relative;

@@ -25,6 +25,7 @@ import {
 import { initial, play } from "../../lib/game";
 import { GameSounds } from "../../lib/sounds";
 import Board from "./board";
+import { RESULT_HOLD_MS } from "../../lib/timing";
 import StatHeader from "../stat-header";
 import FeedbackButton from "../feedback-button";
 import ShareLink from "../share-link";
@@ -567,6 +568,56 @@ function Arena({ guest }: { guest: boolean }) {
     !!confirmedMatch &&
     optimistic.match.state.moves.length > confirmedMatch.state.moves.length;
   const match = showOptimistic ? optimistic!.match : confirmedMatch;
+  // Follow the last visible match through a server-side phase change, including
+  // opponent moves and the match being scouted between rounds.
+  const lastVisibleMatch = useRef<{ tournament: string; id: number } | null>(
+    null,
+  );
+  const presentedMatch = useRef("");
+  const [heldMatch, setHeldMatch] = useState<{
+    tournament: string;
+    match: PublicTournament["matches"][number];
+  } | null>(null);
+  const completedMatch =
+    lastVisibleMatch.current?.tournament === t?.id
+      ? t?.matches[lastVisibleMatch.current!.id]
+      : undefined;
+  const completedKey =
+    completedMatch?.status === "finished"
+      ? `${t?.id}:${completedMatch.id}`
+      : "";
+  const freshCompletion =
+    completedKey && completedKey !== presentedMatch.current
+      ? completedMatch
+      : undefined;
+  const celebration =
+    heldMatch && heldMatch.tournament === t?.id
+      ? heldMatch.match
+      : freshCompletion;
+  const displayMatch = celebration || match;
+  useEffect(() => {
+    if (freshCompletion && t?.id) {
+      presentedMatch.current = completedKey;
+      setHeldMatch({ tournament: t.id, match: freshCompletion });
+      // Participant sounds are handled by the entrant outcome effect below.
+      if (!freshCompletion.players.includes(data!.profile._id))
+        sounds.current?.play("win");
+    } else if (!celebration && match?.status === "playing" && t?.id) {
+      lastVisibleMatch.current = { tournament: t.id, id: match.id };
+    }
+  }, [
+    freshCompletion,
+    completedKey,
+    celebration,
+    match,
+    t?.id,
+    data?.profile._id,
+  ]);
+  useEffect(() => {
+    if (!heldMatch) return;
+    const timer = setTimeout(() => setHeldMatch(null), RESULT_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [heldMatch]);
   useEffect(() => {
     if (optimistic && !showOptimistic) setOptimistic(null);
   }, [optimistic, showOptimistic]);
@@ -619,9 +670,14 @@ function Arena({ guest }: { guest: boolean }) {
     finished = phase === "results",
     lobby = phase === "lobby",
     idle = !p.active && !finished;
-  const seat = match?.players.indexOf(p._id) ?? -1;
+  const seat = displayMatch?.players.indexOf(p._id) ?? -1;
   const canPlay =
-    playing && !!match && seat === (match.state.turn === 1 ? 0 : 1) && !pending;
+    !celebration &&
+    playing &&
+    !!match &&
+    !match.state.winner &&
+    seat === (match.state.turn === 1 ? 0 : 1) &&
+    !pending;
   const theme =
     cosmetics.find((c) => c.id === p.equipped.theme)?.name.toLowerCase() ||
     "default";
@@ -676,7 +732,11 @@ function Arena({ guest }: { guest: boolean }) {
           Connection interrupted. Reconnecting to your saved game…
         </p>
       ) : null}
-      {guest && finished && data.history.length === 1 && !p.active ? (
+      {guest &&
+      finished &&
+      !celebration &&
+      data.history.length === 1 &&
+      !p.active ? (
         <GuestLoginPrompt profileId={p._id} pending={pending} onLogin={login} />
       ) : null}
       {error ? (
@@ -847,7 +907,7 @@ function Arena({ guest }: { guest: boolean }) {
           <Warmup />
         </div>
       ) : null}
-      {finished && t && !showResultsWatch ? (
+      {finished && !celebration && t && !showResultsWatch ? (
         <div className="game-choices">
           <section
             className={`royale-card result-card ${me?.finish === 4 ? "champion" : ""}`}
@@ -936,48 +996,58 @@ function Arena({ guest }: { guest: boolean }) {
           <SingleGames />
         </div>
       ) : null}
-      {(playing || waiting || countdown || (finished && showResultsWatch)) &&
+      {(celebration ||
+        playing ||
+        waiting ||
+        countdown ||
+        (finished && showResultsWatch)) &&
       t ? (
         <div className="royale-workspace">
           <section className={`arena theme-${theme}`}>
             <div className="eyebrow">
-              {waiting
-                ? "YOU ADVANCED · SCOUT YOUR NEXT OPPONENT"
-                : countdown
-                  ? "NEXT MATCH CONFIRMED"
-                  : finished
-                    ? "LIVE SPECTATOR"
-                    : match
-                      ? roundNames[match.round].toUpperCase()
-                      : "YOUR BRACKET"}
+              {celebration
+                ? "MATCH COMPLETE"
+                : waiting
+                  ? "YOU ADVANCED · SCOUT YOUR NEXT OPPONENT"
+                  : countdown
+                    ? "NEXT MATCH CONFIRMED"
+                    : finished
+                      ? "LIVE SPECTATOR"
+                      : displayMatch
+                        ? roundNames[displayMatch.round].toUpperCase()
+                        : "YOUR BRACKET"}
             </div>
             <h2>
-              {waiting
-                ? `Watching your ${roundNames[data.view?.nextRound ?? 1].toLowerCase()} opponent`
-                : countdown
-                  ? `Your next match starts in ${Math.max(0, Math.ceil(((match?.startAt || now) - now) / 1000))}s`
-                  : playing
-                    ? canPlay
-                      ? "Your turn."
-                      : "Opponent’s turn."
-                    : "Follow the crown."}
+              {celebration
+                ? "MATCH COMPLETE"
+                : waiting
+                  ? `Watching your ${roundNames[data.view?.nextRound ?? 1].toLowerCase()} opponent`
+                  : countdown
+                    ? `Your next match starts in ${Math.max(0, Math.ceil(((displayMatch?.startAt || now) - now) / 1000))}s`
+                    : playing
+                      ? canPlay
+                        ? "Your turn."
+                        : "Opponent’s turn."
+                      : "Follow the crown."}
             </h2>
-            {match ? (
+            {displayMatch ? (
               <>
                 <div className="score">
-                  {match.players.map((id, i) => {
+                  {displayMatch.players.map((id, i) => {
                     const e = t.entrants.find((entry) => entry.id === id);
                     const remaining =
-                      match.clocks[i] -
-                      (match.status === "playing" &&
-                      i === (match.state.turn === 1 ? 0 : 1)
-                        ? Math.max(0, now - match.turnAt)
+                      displayMatch.clocks[i] -
+                      (displayMatch.status === "playing" &&
+                      i === (displayMatch.state.turn === 1 ? 0 : 1)
+                        ? Math.max(0, now - displayMatch.turnAt)
                         : 0);
                     return (
                       <span
                         key={id}
                         className={
-                          i === (match.state.turn === 1 ? 0 : 1) ? "active" : ""
+                          i === (displayMatch.state.turn === 1 ? 0 : 1)
+                            ? "active"
+                            : ""
                         }
                       >
                         {i === 0 ? "✕" : "◯"} {e?.name}
@@ -987,24 +1057,41 @@ function Arena({ guest }: { guest: boolean }) {
                   })}
                 </div>
                 <Board
-                  state={match.state}
+                  state={displayMatch.state}
                   enabled={canPlay}
+                  result={
+                    celebration
+                      ? celebration.winner === p._id
+                        ? "Victory"
+                        : celebration.players.includes(p._id)
+                          ? "Defeat"
+                          : `${t.entrants.find((e) => e.id === celebration.winner)?.name || "Opponent"} wins`
+                      : undefined
+                  }
                   onMove={(action) =>
                     void act(async () => {
-                      const next = play(match.state, action);
-                      const clocks = [...match.clocks] as [number, number];
+                      const next = play(displayMatch.state, action);
+                      const clocks = [...displayMatch.clocks] as [
+                        number,
+                        number,
+                      ];
                       clocks[next.turn === 1 ? 0 : 1] = (
                         t.settings || DEFAULT_SETTINGS
                       ).clockMs;
                       setOptimistic({
                         tournament: t.id!,
-                        match: { ...match, state: next, clocks, turnAt: now },
+                        match: {
+                          ...displayMatch,
+                          state: next,
+                          clocks,
+                          turnAt: now,
+                        },
                       });
                       try {
                         const accepted = await move({
                           tournament: t.id!,
-                          match: match.id,
-                          seq: match.state.moves.length,
+                          match: displayMatch.id,
+                          seq: displayMatch.state.moves.length,
                           action,
                         });
                         clockOffset.current = accepted.serverNow - Date.now();
@@ -1020,21 +1107,23 @@ function Arena({ guest }: { guest: boolean }) {
                   }
                 />
                 <p className="hint">
-                  {waiting || finished
-                    ? "Watching live · your next match begins automatically when both players are ready."
-                    : countdown
-                      ? "Get ready. Your thinking clock starts with the match."
-                      : match.state.forced === -1
-                        ? "Free choice · play in any highlighted board."
-                        : `Next move · board ${match.state.forced + 1} is highlighted.`}
+                  {celebration
+                    ? "MATCH COMPLETE"
+                    : waiting || finished
+                      ? "Watching live · your next match begins automatically when both players are ready."
+                      : countdown
+                        ? "Get ready. Your thinking clock starts with the match."
+                        : displayMatch.state.forced === -1
+                          ? "Free choice · play in any highlighted board."
+                          : `Next move · board ${displayMatch.state.forced + 1} is highlighted.`}
                 </p>
-                {match.tieReveal ? (
+                {displayMatch.tieReveal ? (
                   <details>
                     <summary>Tiebreak proof</summary>
                     <p className="proof">
-                      Commitment: {match.commitment}
+                      Commitment: {displayMatch.commitment}
                       <br />
-                      Revealed seed: {match.tieReveal}
+                      Revealed seed: {displayMatch.tieReveal}
                     </p>
                   </details>
                 ) : null}
@@ -1042,16 +1131,20 @@ function Arena({ guest }: { guest: boolean }) {
             ) : (
               <p>Waiting for the bracket to update…</p>
             )}
-            {playing || countdown || waiting ? (
+            {!celebration && (playing || countdown || waiting) ? (
               <button
                 className="secondary"
                 disabled={pending}
                 onClick={() => void act(() => resign({ tournament: t.id! }))}
               >
-                {waiting ? "Withdraw from tournament" : "Resign match"}
+                {celebration
+                  ? "MATCH COMPLETE"
+                  : waiting
+                    ? "Withdraw from tournament"
+                    : "Resign match"}
               </button>
             ) : null}
-            {finished ? (
+            {finished && !celebration ? (
               <button
                 className="secondary"
                 onClick={() => setWatchResults(false)}
@@ -1063,11 +1156,15 @@ function Arena({ guest }: { guest: boolean }) {
           <Bracket
             t={t}
             player={p._id}
-            onSelect={finished ? (id) => setSelectedMatch(id) : undefined}
+            onSelect={
+              finished && !celebration
+                ? (id) => setSelectedMatch(id)
+                : undefined
+            }
           />
         </div>
       ) : null}
-      {finished && t && !showResultsWatch ? (
+      {finished && !celebration && t && !showResultsWatch ? (
         <Bracket t={t} player={p._id} />
       ) : null}
       <DailyQuests quest={data.quests} />
