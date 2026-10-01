@@ -1,8 +1,19 @@
 import type { PoolClient } from "pg";
-import { getPool, query } from "../db";
+import { query, withTransaction } from "../db";
 import { DEFAULT_SETTINGS, type Tournament } from "../royale";
 
 type Values = Record<string, number>;
+
+async function lockMetrics(client: PoolClient) {
+  // Serialize read/modify/write counters and idempotency checks before reading
+  // them. All telemetry takes this lock before campaign or per-day rows.
+  await client.query(
+    "INSERT INTO metric_rollups (bucket, values) VALUES ('all', '{}'::jsonb) ON CONFLICT DO NOTHING",
+  );
+  await client.query(
+    "SELECT bucket FROM metric_rollups WHERE bucket = 'all' FOR UPDATE",
+  );
+}
 export const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
 
 export async function sourceMetric(
@@ -10,8 +21,11 @@ export async function sourceMetric(
   acquisition: { source: string; campaign: string },
   at: number,
   metric: string,
-) {
-  const q = client ? client.query.bind(client) : query;
+): Promise<void> {
+  if (!client)
+    return withTransaction((c) => sourceMetric(c, acquisition, at, metric));
+  await lockMetrics(client);
+  const q = client.query.bind(client);
   for (const bucket of ["all", utcDay(at)]) {
     const res = await q(
       "SELECT values FROM campaign_metrics WHERE source = $1 AND campaign = $2 AND bucket = $3",
@@ -24,7 +38,12 @@ export async function sourceMetric(
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (source, campaign, bucket)
        DO UPDATE SET values = $4`,
-      [acquisition.source, acquisition.campaign, bucket, JSON.stringify(values)],
+      [
+        acquisition.source,
+        acquisition.campaign,
+        bucket,
+        JSON.stringify(values),
+      ],
     );
   }
 }
@@ -34,9 +53,13 @@ export async function fact(
   key: string,
   at: number,
   values: Values,
-) {
-  const q = client ? client.query.bind(client) : query;
-  const res = await q("SELECT day, values FROM metric_facts WHERE key = $1", [key]);
+): Promise<void> {
+  if (!client) return withTransaction((c) => fact(c, key, at, values));
+  await lockMetrics(client);
+  const q = client.query.bind(client);
+  const res = await q("SELECT day, values FROM metric_facts WHERE key = $1", [
+    key,
+  ]);
   const prior = res.rows[0];
   const day = prior?.day || utcDay(at);
   const delta: Values = {};
@@ -50,7 +73,10 @@ export async function fact(
   if (!Object.keys(delta).length && prior) return;
 
   for (const bucket of ["all", day]) {
-    const rRes = await q("SELECT values FROM metric_rollups WHERE bucket = $1", [bucket]);
+    const rRes = await q(
+      "SELECT values FROM metric_rollups WHERE bucket = $1",
+      [bucket],
+    );
     const rollup = rRes.rows[0];
     const totals: Values = { ...(rollup?.values || {}) };
     for (const [name, change] of Object.entries(delta)) {
@@ -105,11 +131,7 @@ export async function participated(
   }
 }
 
-export async function activity(
-  client: PoolClient | null,
-  p: any,
-  now: number,
-) {
+export async function activity(client: PoolClient | null, p: any, now: number) {
   const authId = p.auth_id || p.authId;
   if (authId.startsWith("linked:")) return;
   const day = utcDay(now);
@@ -140,13 +162,19 @@ export async function mergeActivity(
     await q("SELECT day FROM player_activity WHERE profile = $1", [source.id])
   ).rows;
   for (const row of rows) {
-    await fact(client, `activity:${source.id}:${row.day}`, Date.parse(row.day), {});
+    await fact(
+      client,
+      `activity:${source.id}:${row.day}`,
+      Date.parse(row.day),
+      {},
+    );
     await activity(client, target, Date.parse(`${row.day}T12:00:00Z`));
   }
 }
 
 export async function observeReward(client: PoolClient | null, r: any) {
-  if (r.xp > 0) await participated(client, r.profile, Number(r.created_at || r.createdAt));
+  if (r.xp > 0)
+    await participated(client, r.profile, Number(r.created_at || r.createdAt));
   const finish = Number(r.finish);
   const xp = Number(r.xp);
   const crown = r.crown ?? (finish === 4 && xp > 0);
@@ -204,7 +232,9 @@ export async function observeTournament(
       for (const player of began ? m.players : []) {
         if (!t.entrants.some((e) => e.id === player && !e.cpu)) continue;
         const key = `first-finish:${player}`;
-        const priorFact = await q("SELECT 1 FROM metric_facts WHERE key = $1", [key]);
+        const priorFact = await q("SELECT 1 FROM metric_facts WHERE key = $1", [
+          key,
+        ]);
         if (priorFact.rows.length > 0) continue;
         const pRes = await q("SELECT * FROM profiles WHERE id = $1", [player]);
         const p = pRes.rows[0];
@@ -222,21 +252,26 @@ export async function observeTournament(
           firstMatchesPlayedThrough: playedThrough ? 1 : 0,
         });
       }
-      await fact(client, `match-finish:${id}:${m.id}`, m.finishedAt || m.startAt, {
-        matchesCompleted: 1,
-        humanMatchesCompleted: human ? 1 : 0,
-        legalMoves: m.state.moves.length,
-        clockForfeits: m.reason === "clock" ? 1 : 0,
-        resignations: m.reason === "resigned" ? 1 : 0,
-        cappedMatches:
-          m.reason === "board score" && (m.finishedAt || 0) >= m.deadline
-            ? 1
+      await fact(
+        client,
+        `match-finish:${id}:${m.id}`,
+        m.finishedAt || m.startAt,
+        {
+          matchesCompleted: 1,
+          humanMatchesCompleted: human ? 1 : 0,
+          legalMoves: m.state.moves.length,
+          clockForfeits: m.reason === "clock" ? 1 : 0,
+          resignations: m.reason === "resigned" ? 1 : 0,
+          cappedMatches:
+            m.reason === "board score" && (m.finishedAt || 0) >= m.deadline
+              ? 1
+              : 0,
+          matchDurationSamples: began ? 1 : 0,
+          matchDurationMs: began
+            ? Math.max(0, (m.finishedAt || m.startAt) - m.startAt)
             : 0,
-        matchDurationSamples: began ? 1 : 0,
-        matchDurationMs: began
-          ? Math.max(0, (m.finishedAt || m.startAt) - m.startAt)
-          : 0,
-      });
+        },
+      );
     }
   }
   if (t.status === "finished" && previous?.status !== "finished") {
@@ -290,8 +325,9 @@ export async function observeEvent(client: PoolClient | null, e: any) {
 export async function recordEvent(
   client: PoolClient | null,
   e: { kind: string; tournament?: string; at: number; value?: number },
-) {
-  const q = client ? client.query.bind(client) : query;
+): Promise<void> {
+  if (!client) return withTransaction((c) => recordEvent(c, e));
+  const q = client.query.bind(client);
   const id = crypto.randomUUID();
   await q(
     "INSERT INTO events (id, kind, tournament, at, value) VALUES ($1, $2, $3, $4, $5)",
@@ -301,7 +337,9 @@ export async function recordEvent(
 }
 
 export async function publicStats() {
-  const res = await query("SELECT values FROM metric_rollups WHERE bucket = 'all'");
+  const res = await query(
+    "SELECT values FROM metric_rollups WHERE bucket = 'all'",
+  );
   const totals: Values = res.rows[0]?.values || {};
   return {
     players: totals.playersWhoPlayed || 0,
@@ -312,7 +350,9 @@ export async function publicStats() {
 
 export async function live() {
   const stats = await publicStats();
-  const res = await query("SELECT values FROM metric_rollups WHERE bucket = 'all'");
+  const res = await query(
+    "SELECT values FROM metric_rollups WHERE bucket = 'all'",
+  );
   const totals: Values = res.rows[0]?.values || {};
   return {
     ...stats,

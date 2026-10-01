@@ -12,6 +12,24 @@ if (process.env.DATABASE_URL !== url)
   );
 async function main() {
   await initDb();
+  const workers = Number(process.env.STRESS_WORKERS || 4);
+  const rounds = Number(process.env.STRESS_ROUNDS || 6);
+  if (
+    !Number.isInteger(workers) ||
+    workers < 1 ||
+    workers > 20 ||
+    !Number.isInteger(rounds) ||
+    rounds < 1 ||
+    rounds > 50
+  )
+    throw new Error("Use 1–20 workers and 1–50 rounds");
+  const deadlocksBefore = Number(
+    (
+      await query(
+        "SELECT deadlocks FROM pg_stat_database WHERE datname=current_database()",
+      )
+    ).rows[0].deadlocks,
+  );
   const delay = monitorEventLoopDelay({ resolution: 20 });
   delay.enable();
   const durations: number[] = [],
@@ -40,7 +58,7 @@ async function main() {
       [auth, `Load ${index}`, `${auth}@example.invalid`],
     );
     const player = await royale.ensureProfile(auth, true);
-    for (let round = 0; round < 6; round++) {
+    for (let round = 0; round < rounds; round++) {
       const code = await timed(() => growth.host(auth));
       const row = (
         await query("SELECT * FROM tournaments WHERE room_code=$1", [code])
@@ -84,13 +102,13 @@ async function main() {
       if (result.profile.active)
         throw new Error("Resigned player still active");
       console.log(
-        `worker ${index}: ${round + 1}/6 games, queued ${getPool().waitingCount}`,
+        `worker ${index}: ${round + 1}/${rounds} games, queued ${getPool().waitingCount}`,
       );
     }
   }
-  await Promise.all(Array.from({ length: 4 }, (_, i) => worker(i)));
+  await Promise.all(Array.from({ length: workers }, (_, i) => worker(i)));
   // Complete the abandoned brackets: reproduces the extra background work left by repeat players.
-  for (let tick = 0; tick < 350; tick++) {
+  for (let tick = 0; tick < 1000; tick++) {
     const active = (
       await query(
         "SELECT id FROM tournaments WHERE id=ANY($1) AND status='active'",
@@ -101,7 +119,7 @@ async function main() {
     await Promise.all(
       active.map((r) => timed(() => royale.driveBots(r.id, 0))),
     );
-    if (tick === 349) throw new Error("Brackets did not finish");
+    if (tick === 999) throw new Error("Brackets did not finish");
   }
   const stats = (
     await query(
@@ -120,6 +138,16 @@ async function main() {
     eventLoopP99Ms: Math.round(delay.percentile(99) / 1e6),
     eventLoopMaxMs: Math.round(delay.max / 1e6),
     peakPoolWaiting: peakWaiting,
+    workers,
+    rounds,
+    deadlocks:
+      Number(
+        (
+          await query(
+            "SELECT deadlocks FROM pg_stat_database WHERE datname=current_database()",
+          )
+        ).rows[0].deadlocks,
+      ) - deadlocksBefore,
   };
   writeFileSync(
     "artifacts/freeze-stress/repeated-games.json",
@@ -129,7 +157,7 @@ async function main() {
   clearInterval(sampler);
   delay.disable();
   await getPool().end();
-  process.exit(errors.length ? 1 : 0);
+  process.exit(errors.length || report.deadlocks ? 1 : 0);
 }
 void main().catch((e) => {
   console.error(e);

@@ -127,3 +127,93 @@ npx playwright test e2e/background-freeze.spec.ts
 Stress summaries and browser screenshots/traces are written under the ignored
 `artifacts/freeze-stress/` directory. The browser recovery test requires base URL
 `http://127.0.0.1:3100` and the disposable database URL; otherwise it skips.
+
+## Extended stress run and independent watchdog
+
+Follow-up baseline: `86f125f` on main. All mutations again used the disposable
+localhost database, not production.
+
+Two additional lock cycles were reproduced despite bounded automatic retries:
+
+- Daily return wrote the shared telemetry rollup before updating the profile,
+  while reward/profile writers did the reverse. PostgreSQL reported `40P01`;
+  the retry completed after 1,129 ms. Updating the profile first reduced the
+  reproduction to 169 ms with zero deadlocks.
+- Match-start telemetry for CPU-only matches took the rollup lock before a
+  later human match updated `played_at`. A concurrent profile writer held the
+  profile while waiting for the rollup. This reproduced `40P01` and took
+  1,190 ms; locking every human entrant in sorted order before any telemetry
+  reduced it to 187 ms with zero deadlocks. `FOR NO KEY UPDATE` keeps reward
+  and activity foreign-key checks compatible.
+
+Account mutations serialize on the authentication user before choosing a
+lobby. Join/leave and account linking follow consistent tournament/profile/
+telemetry ordering. Concurrent joins for one account create one lobby entry.
+Telemetry locks its global rollup before reading existing facts or counters,
+then accesses campaign/day rows. This prevents stale counter overwrites and
+campaign/global lock inversions; it does not recompute historical totals.
+
+The final repeated-game run used 16 workers entering ten Royales apiece while
+abandoned brackets continued: all 160 completed, 50,759 measured operations,
+zero errors, zero PostgreSQL deadlocks, 80.714 seconds, p95 197 ms, maximum
+518 ms, event-loop maximum 35 ms, and peak pool waiters 140. Countdown and
+bot delays were shortened only in these fixtures.
+
+Eight concurrent strongest-engine brackets exposed CPU starvation separately:
+one driver computed every due match synchronously, blocking the event loop
+for 8,984 ms. Drivers now compute at most two oldest-due moves per pass, and a
+process-wide queue yields between individual searches. The same stress case
+completed all eight driver requests in 5,570 ms, with event-loop maximum
+453 ms; a final repeat verified 16 CPU moves in 3,580 ms with a 278 ms
+maximum event-loop stall. Later overdue turns remain scheduled, and a regression test verifies
+that every first-round match receives a turn without starvation. This is
+cooperative scheduling on one process, not a production throughput benchmark.
+
+The independent watchdog is `GET /api/cron/royale`, protected by the server-only
+`CRON_SECRET`. Vercel runs it every minute. Each invocation examines at most
+50 stale active/lobby records in oldest-update order and stops starting new
+work after 20 seconds, with a 60-second function runtime limit. It awaits the
+normal driver, which rechecks deadlines and move sequences under the tournament
+lock. It does not invent winners or expire a future turn. Recovery telemetry
+is written in the same transaction only when state actually advances. Held
+locks and partial failures are logged and return 503; subsequent minutely
+runs can retry. Overlapping drivers and repeated recovery cannot award a
+second crown or reward.
+
+Regression tests cover a lost countdown, expired human clocks, an overdue
+lobby, healthy future deadlines, simultaneous recovery/dashboard reads, a lost
+final awarding exactly one crown, and a held database lock followed by successful
+recovery. Authorization tests reject missing/incorrect secrets before any game
+work and report scan failures without exposing database details.
+
+The complete browser rerun includes public-relay multiplayer, lost/late action
+responses, normal turn expiry, six repeated games, actual minimized/frozen
+Chromium and WASM recovery, and a 16-session, 750-click tournament ending in
+one crown and fifteen defeats. It also exposed a bootstrap remount that closed
+an open feedback form. Keeping the page shell mounted preserves the dialog
+and typed feedback across guest setup; the regression deliberately delays
+profile creation to exercise that transition. Leaderboard/telemetry browser
+tests now use the migrated HTTP RPC API and read the stat label explicitly.
+
+Reproduce the additional stress cases:
+
+```powershell
+$env:DATABASE_URL='postgresql://stress_user@127.0.0.1:55432/freeze_stress'
+npx tsx scripts/stress-profile-locks.ts
+$env:LOCK_CASE='driver'
+npx tsx scripts/stress-profile-locks.ts
+Remove-Item Env:LOCK_CASE
+$env:STRESS_WORKERS='16'
+$env:STRESS_ROUNDS='10'
+npx tsx scripts/stress-royale-repeat.ts
+npx tsx scripts/stress-strong-cpu.ts
+```
+
+Keep destructive backend suites separate from concurrent browser/stress runs.
+Local stress does not reproduce every mobile browser, Neon cold start, or Vercel
+concurrency limit; production watchdog and slow-request logs remain useful.
+
+Final validation: 42 core/client/watchdog tests, 24 PostgreSQL backend tests,
+3 Python/TypeScript/PyTorch/WASM parity tests, and 34 browser tests passed
+(103 total). The single browser scenario for an unconfigured database skipped
+on this configured server. TypeScript and the optimized production build passed.

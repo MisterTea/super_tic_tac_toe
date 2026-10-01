@@ -41,7 +41,7 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   }
   render() {
     return this.state.failed ? (
-      <Shell>
+      <>
         <section className="royale-card">
           <h1>Connection interrupted.</h1>
           <p>Your tournament is saved. Reconnect to restore your place.</p>
@@ -49,7 +49,7 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
             Reconnect
           </button>
         </section>
-      </Shell>
+      </>
     ) : (
       this.props.children
     );
@@ -225,14 +225,16 @@ export default function Royale({
   daily?: boolean;
 }) {
   return (
-    <Boundary>
-      <ConvexBetterAuthProvider
-        client={getClient()}
-        authClient={authClient as any}
-      >
-        <Session account={account} daily={daily} />
-      </ConvexBetterAuthProvider>
-    </Boundary>
+    <Shell>
+      <Boundary>
+        <ConvexBetterAuthProvider
+          client={getClient()}
+          authClient={authClient as any}
+        >
+          <Session account={account} daily={daily} />
+        </ConvexBetterAuthProvider>
+      </Boundary>
+    </Shell>
   );
 }
 function Session({ account, daily }: { account: boolean; daily: boolean }) {
@@ -288,7 +290,7 @@ function Session({ account, daily }: { account: boolean; daily: boolean }) {
   }, [isAuthenticated, ensure, attribute]);
   if (!ready)
     return (
-      <Shell>
+      <>
         <section className="royale-card">
           <h1>{error ? "Could not enter the arena." : "Opening the arena…"}</h1>
           <p role="status">{error || "Restoring your player profile."}</p>
@@ -299,18 +301,18 @@ function Session({ account, daily }: { account: boolean; daily: boolean }) {
           ) : null}
         </section>
         <SingleGames />
-      </Shell>
+      </>
     );
   const guest = !!session.data?.user.isAnonymous;
   return account ? (
     <Account guest={guest} />
   ) : daily ? (
-    <Shell>
+    <>
       <a className="secondary" href="/">
         ← Royale
       </a>
       <DailyChallenge />
-    </Shell>
+    </>
   ) : (
     <Arena guest={guest} />
   );
@@ -348,13 +350,13 @@ function Account({ guest }: { guest: boolean }) {
   }
   if (!data)
     return (
-      <Shell>
+      <>
         <p role="status">Loading your account…</p>
-      </Shell>
+      </>
     );
   const p = data.profile;
   return (
-    <Shell>
+    <>
       <a className="account-back" href="/">
         ← Back to games
       </a>
@@ -503,7 +505,7 @@ function Account({ guest }: { guest: boolean }) {
         ) : null}
         {saved ? <p role="status">{saved}</p> : null}
       </section>
-    </Shell>
+    </>
   );
 }
 function Arena({ guest }: { guest: boolean }) {
@@ -602,9 +604,9 @@ function Arena({ guest }: { guest: boolean }) {
   }
   if (!data)
     return (
-      <Shell>
+      <>
         <p role="status">Loading your arena…</p>
-      </Shell>
+      </>
     );
   const p = data.profile,
     level = levelFor(p.xp),
@@ -629,7 +631,7 @@ function Arena({ guest }: { guest: boolean }) {
     cosmetics.find((c) => c.id === p.equipped.effect)?.name || "Crown";
   const login = () => location.assign("/account");
   return (
-    <Shell>
+    <>
       <div className="player-strip">
         <a
           className="profile-chip"
@@ -1089,7 +1091,7 @@ function Arena({ guest }: { guest: boolean }) {
           cannot lose points. Cosmetics never change your strength.
         </p>
       </details>
-    </Shell>
+    </>
   );
 }
 function finishLabel(finish: number) {

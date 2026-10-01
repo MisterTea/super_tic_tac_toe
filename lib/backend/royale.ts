@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { query, withTransaction } from "../db";
 import { claimName, generatedName } from "./names";
 import { displayName } from "../player-names";
@@ -45,6 +46,11 @@ export async function getProfileByAuthId(
   authId: string,
   client?: PoolClient | null,
 ) {
+  // Serialize account actions without taking profile locks before tournament locks.
+  if (client)
+    await client.query('SELECT id FROM "user" WHERE id = $1 FOR UPDATE', [
+      authId,
+    ]);
   const q = client ? client.query.bind(client) : query;
   const res = await q("SELECT * FROM profiles WHERE auth_id = $1", [authId]);
   if (!res.rows[0]) throw new ApiError("Create a player profile first");
@@ -107,13 +113,27 @@ export async function settle(
     if (existing) {
       await client.query(
         "UPDATE quests SET completed = $1, boards = $2, wins = $3, claimed = $4 WHERE id = $5",
-        [quest.completed, quest.boards, quest.wins, JSON.stringify(quest.claimed), existing.id],
+        [
+          quest.completed,
+          quest.boards,
+          quest.wins,
+          JSON.stringify(quest.claimed),
+          existing.id,
+        ],
       );
     } else {
       const qId = crypto.randomUUID();
       await client.query(
         "INSERT INTO quests (id, profile, day, completed, boards, wins, claimed) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        [qId, p.id, day(now), quest.completed, quest.boards, quest.wins, JSON.stringify(quest.claimed)],
+        [
+          qId,
+          p.id,
+          day(now),
+          quest.completed,
+          quest.boards,
+          quest.wins,
+          JSON.stringify(quest.claimed),
+        ],
       );
     }
 
@@ -130,7 +150,14 @@ export async function settle(
       `UPDATE profiles
        SET points = $1, xp = $2, crowns = $3, cosmetics = $4, active = $5
        WHERE id = $6`,
-      [newPoints, xp, newCrowns, JSON.stringify(allCosmetics), activeUpdate, p.id],
+      [
+        newPoints,
+        xp,
+        newCrowns,
+        JSON.stringify(allCosmetics),
+        activeUpdate,
+        p.id,
+      ],
     );
 
     const rewardId = crypto.randomUUID();
@@ -173,13 +200,27 @@ export async function settle(
 
 const wakeTimers = new Map<string, NodeJS.Timeout>();
 
+async function lockEntrants(client: PoolClient, t: Tournament) {
+  // Older brackets can overlap requeues. Lock every human in the same order
+  // before shared telemetry, including humans who already finished. NO KEY
+  // UPDATE remains compatible with foreign-key checks on reward/activity rows.
+  await client.query(
+    "SELECT id FROM profiles WHERE id = ANY($1::text[]) ORDER BY id FOR NO KEY UPDATE",
+    [t.entrants.filter((e) => !e.cpu).map((e) => e.id)],
+  );
+}
+
 export async function save(
   client: PoolClient,
   id: string,
   t: Tournament,
   now: number,
 ) {
-  const prevRes = await client.query("SELECT state FROM tournaments WHERE id = $1", [id]);
+  await lockEntrants(client, t);
+  const prevRes = await client.query(
+    "SELECT state FROM tournaments WHERE id = $1",
+    [id],
+  );
   const previous = prevRes.rows[0]?.state as Tournament | undefined;
 
   if (previous?.status === "lobby" && t.status === "active") {
@@ -262,58 +303,128 @@ export function scheduleBotDrive(id: string, version: number, delayMs: number) {
   wakeTimers.set(id, timer);
 }
 
-const botDrives = new Map<string, Promise<void>>();
+const botDrives = new Map<string, Promise<boolean>>();
 
-export async function driveBots(tournamentId: string, _version: number) {
+let cpuWork: Promise<unknown> = Promise.resolve();
+function computeCpuAction(
+  state: Parameters<typeof skillMove>[0],
+  skill: number,
+  seed: number,
+) {
+  // One search per event-loop turn across all brackets in this process.
+  // Independent drivers yielding together must not create another CPU burst.
+  const work = cpuWork.then(async () => {
+    await yieldToEventLoop();
+    return skillMove(state, skill, model as SkillModel, seeded(seed));
+  });
+  cpuWork = work.catch(() => undefined);
+  return work;
+}
+
+export async function driveBots(
+  tournamentId: string,
+  _version: number,
+  watchdog = false,
+) {
   const running = botDrives.get(tournamentId);
   if (running) return running;
-  const work = runBotDrive(tournamentId);
+  const work = runBotDrive(tournamentId, watchdog);
   botDrives.set(tournamentId, work);
   try {
-    await work;
+    return await work;
   } finally {
     botDrives.delete(tournamentId);
   }
 }
 
-async function runBotDrive(tournamentId: string) {
-  const snapshot = (await query("SELECT state FROM tournaments WHERE id = $1", [tournamentId])).rows[0]?.state as Tournament | undefined;
-  if (!snapshot) return;
+async function runBotDrive(tournamentId: string, watchdog: boolean) {
+  const snapshot = (
+    await query("SELECT state FROM tournaments WHERE id = $1", [tournamentId])
+  ).rows[0]?.state as Tournament | undefined;
+  if (!snapshot) return false;
   const computedAt = Date.now();
   advanceTime(snapshot, computedAt);
-  // Compute moves before taking the write lock shared with human moves.
-  const moves = snapshot.matches.flatMap((m) => {
+  // Bound synchronous strongest-engine work per request. Oldest due turns
+  // go first; remaining turns are rescheduled by nextWake after this pass.
+  // Compute outside the game lock and let I/O/timeouts run between searches.
+  const due = snapshot.matches
+    .filter((m) => {
+      const player = m.players[m.state.turn === 1 ? 0 : 1];
+      return (
+        m.status === "playing" &&
+        m.botAt <= computedAt &&
+        snapshot.entrants.some((e) => e.id === player && e.cpu)
+      );
+    })
+    .sort((a, b) => a.botAt - b.botAt || a.id - b.id)
+    .slice(0, 2);
+  const moves: {
+    match: number;
+    seq: number;
+    player: string;
+    action: number;
+  }[] = [];
+  for (const m of due) {
     const player = m.players[m.state.turn === 1 ? 0 : 1];
-    const entrant = snapshot.entrants.find(e => e.id === player);
-    if (m.status !== "playing" || m.botAt > computedAt || !entrant?.cpu) return [];
-    return [{ match: m.id, seq: m.state.moves.length, player,
-      action: skillMove(m.state, entrant.skill, model as SkillModel, seeded(snapshot.seed + m.id * 1000 + m.version)) }];
-  });
-  await withTransaction(async (client) => {
-    const row = (await client.query("SELECT * FROM tournaments WHERE id = $1 FOR UPDATE", [tournamentId])).rows[0];
-    if (!row) return;
+    const entrant = snapshot.entrants.find((e) => e.id === player)!;
+    moves.push({
+      match: m.id,
+      seq: m.state.moves.length,
+      player,
+      action: await computeCpuAction(
+        m.state,
+        entrant.skill,
+        snapshot.seed + m.id * 1000 + m.version,
+      ),
+    });
+  }
+  return withTransaction(async (client) => {
+    const row = (
+      await client.query("SELECT * FROM tournaments WHERE id = $1 FOR UPDATE", [
+        tournamentId,
+      ])
+    ).rows[0];
+    if (!row) return false;
     const t = row.state as Tournament;
     const before = t.version;
     const now = Date.now();
     advanceTime(t, now);
     for (const move of moves) {
       const m = t.matches[move.match];
-      if (!m || m.status !== "playing" || m.state.moves.length !== move.seq ||
-          m.players[m.state.turn === 1 ? 0 : 1] !== move.player || m.botAt > now) continue;
+      if (
+        !m ||
+        m.status !== "playing" ||
+        m.state.moves.length !== move.seq ||
+        m.players[m.state.turn === 1 ? 0 : 1] !== move.player ||
+        m.botAt > now
+      )
+        continue;
       submitMove(t, m.id, move.player, move.seq, move.action, now);
     }
-    if (t.version !== before) await save(client, tournamentId, t, now);
-    else {
+    if (t.version !== before) {
+      await save(client, tournamentId, t, now);
+      if (watchdog)
+        await recordEvent(client, {
+          kind: "scheduler_recovery",
+          tournament: tournamentId,
+          at: now,
+        });
+      return true;
+    } else {
       const wake = nextWake(t, now);
-      if (wake !== null) scheduleBotDrive(tournamentId, t.version, Math.max(20, wake - now));
+      if (wake !== null)
+        scheduleBotDrive(tournamentId, t.version, Math.max(20, wake - now));
     }
+    return false;
   });
 }
 
 export async function ensureProfile(authId: string, isAnonymous = false) {
   return withTransaction(async (client) => {
     // Serialize first visits for this account before checking for a profile.
-    await client.query('SELECT id FROM "user" WHERE id = $1 FOR UPDATE', [authId]);
+    await client.query('SELECT id FROM "user" WHERE id = $1 FOR UPDATE', [
+      authId,
+    ]);
     const existingRes = await client.query(
       "SELECT * FROM profiles WHERE auth_id = $1",
       [authId],
@@ -330,9 +441,12 @@ export async function ensureProfile(authId: string, isAnonymous = false) {
       if (existing.last_visit_day !== currentDay) {
         updates.push(`last_visit_day = $${pIdx++}`);
         params.push(currentDay);
-        await recordEvent(client, { kind: "daily_return", at: now });
       }
-      if (!isAnonymous && !existing.leaderboard_eligible && !existing.leaderboard_opt_out) {
+      if (
+        !isAnonymous &&
+        !existing.leaderboard_eligible &&
+        !existing.leaderboard_opt_out
+      ) {
         updates.push(`leaderboard_eligible = true`);
       }
       if (updates.length > 0) {
@@ -342,6 +456,9 @@ export async function ensureProfile(authId: string, isAnonymous = false) {
           params,
         );
       }
+      // Profile writes precede shared telemetry, just as reward settlement does.
+      if (existing.last_visit_day !== currentDay)
+        await recordEvent(client, { kind: "daily_return", at: now });
       await activity(client, existing, now);
       return existing.id;
     }
@@ -365,7 +482,11 @@ export async function ensureProfile(authId: string, isAnonymous = false) {
   });
 }
 
-export async function rename(authId: string, rawName: string, isAnonymous = false) {
+export async function rename(
+  authId: string,
+  rawName: string,
+  isAnonymous = false,
+) {
   if (isAnonymous) throw new ApiError("Log in to change your player name.");
   return withTransaction(async (client) => {
     const p = await getProfileByAuthId(authId, client);
@@ -376,12 +497,17 @@ export async function rename(authId: string, rawName: string, isAnonymous = fals
     try {
       name = displayName(rawName);
     } catch (e) {
-      throw new ApiError(e instanceof Error ? e.message : "Invalid player name.");
+      throw new ApiError(
+        e instanceof Error ? e.message : "Invalid player name.",
+      );
     }
     if (!(await claimName(client, name, p.id))) {
       throw new ApiError("That player name is already taken.");
     }
-    await client.query("UPDATE profiles SET name = $1 WHERE id = $2", [name, p.id]);
+    await client.query("UPDATE profiles SET name = $1 WHERE id = $2", [
+      name,
+      p.id,
+    ]);
     return name;
   });
 }
@@ -401,12 +527,28 @@ export async function equip(authId: string, cosmeticId: string) {
   });
 }
 
+function isOverdue(t: Tournament, now: number) {
+  if (t.status === "lobby") return now >= t.closesAt;
+  if (t.status !== "active") return false;
+  return t.matches.some((m) => {
+    if (m.status === "countdown") return now >= m.startAt;
+    if (m.status !== "playing") return false;
+    const seat = m.state.turn === 1 ? 0 : 1;
+    return (
+      now >= Math.min(m.deadline, m.turnAt + m.clocks[seat]) ||
+      (m.botAt <= now && t.entrants.find((e) => e.id === m.players[seat])?.cpu)
+    );
+  });
+}
+
 export async function dashboard(authId: string) {
   const p = await getProfileByAuthId(authId);
   const tournamentId = p.active || p.last;
   let tournamentRow = null;
   if (tournamentId) {
-    const res = await query("SELECT * FROM tournaments WHERE id = $1", [tournamentId]);
+    const res = await query("SELECT * FROM tournaments WHERE id = $1", [
+      tournamentId,
+    ]);
     tournamentRow = res.rows[0];
   }
   let t = tournamentRow?.state as Tournament | undefined;
@@ -414,16 +556,12 @@ export async function dashboard(authId: string) {
   // between requests on a serverless host.
   if (t && (t.status === "lobby" || t.status === "active")) {
     const now = Date.now();
-    const overdue = t.status === "lobby" ? now >= t.closesAt : t.matches.some(m => {
-      if (m.status === "countdown") return now >= m.startAt;
-      if (m.status !== "playing") return false;
-      const seat = m.state.turn === 1 ? 0 : 1;
-      return now >= Math.min(m.deadline, m.turnAt + m.clocks[seat]) ||
-        (m.botAt <= now && t!.entrants.find(e => e.id === m.players[seat])?.cpu);
-    });
+    const overdue = isOverdue(t, now);
     if (overdue) {
       await driveBots(tournamentId!, t.version);
-      tournamentRow = (await query("SELECT * FROM tournaments WHERE id = $1", [tournamentId])).rows[0];
+      tournamentRow = (
+        await query("SELECT * FROM tournaments WHERE id = $1", [tournamentId])
+      ).rows[0];
       t = tournamentRow?.state as Tournament | undefined;
     }
   }
@@ -549,6 +687,7 @@ export async function join(authId: string, roomCode?: string) {
       );
     }
 
+    const createdRoom = !roomRow;
     if (!roomRow) {
       const id = crypto.randomUUID();
       const state = newLobby(tier, now, Math.floor(Math.random() * 2 ** 32));
@@ -559,7 +698,6 @@ export async function join(authId: string, roomCode?: string) {
       roomRow = (
         await client.query("SELECT * FROM tournaments WHERE id = $1", [id])
       ).rows[0];
-      await observeTournament(client, id, roomRow.state as Tournament);
     }
 
     const t = roomRow.state as Tournament;
@@ -575,12 +713,16 @@ export async function join(authId: string, roomCode?: string) {
         wins: 0,
         boards: 0,
       });
+      await lockEntrants(client, t);
       await client.query(
         "UPDATE profiles SET active = $1, last = $1 WHERE id = $2",
         [roomRow.id, p.id],
       );
-      // Gameplay rows must be locked before shared telemetry rows, matching
-      // save/driveBots. Requeue used to invert that order and deadlock.
+      if (t.entrants.length === 16 && !roomRow.room_code)
+        startTournament(t, now);
+      await save(client, roomRow.id, t, now);
+      if (createdRoom) await observeTournament(client, roomRow.id, t);
+      // Account and gameplay writes precede shared telemetry.
       await activity(client, p, now);
       if (p.last) {
         const last = (
@@ -608,10 +750,6 @@ export async function join(authId: string, roomCode?: string) {
           at: now,
         });
       }
-      if (t.entrants.length === 16 && !roomRow.room_code) {
-        startTournament(t, now);
-      }
-      await save(client, roomRow.id, t, now);
     }
 
     return roomRow.id;
@@ -630,11 +768,18 @@ export async function leaveLobby(authId: string) {
     const row = res.rows[0];
     if (!row || row.status !== "lobby") return;
     const t = row.state as Tournament;
+    await lockEntrants(client, t);
     const index = t.entrants.findIndex((e) => e.id === p.id);
     if (index === -1) return;
     t.entrants.splice(index, 1);
-    await client.query("UPDATE profiles SET active = NULL WHERE id = $1", [p.id]);
-    await recordEvent(client, { kind: "lobby_leave", tournament: row.id, at: now });
+    await client.query("UPDATE profiles SET active = NULL WHERE id = $1", [
+      p.id,
+    ]);
+    await recordEvent(client, {
+      kind: "lobby_leave",
+      tournament: row.id,
+      at: now,
+    });
 
     if (!t.entrants.length) {
       await client.query(
@@ -718,13 +863,22 @@ export async function resign(authId: string, tournamentId: string) {
 export async function linkProfiles(fromAuthId: string, toAuthId: string) {
   if (fromAuthId === toAuthId) return;
   return withTransaction(async (client) => {
+    const accounts = [fromAuthId, toAuthId].sort();
+    await client.query(
+      'SELECT id FROM "user" WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE',
+      [accounts],
+    );
+    await client.query(
+      "SELECT id FROM profiles WHERE auth_id = ANY($1::text[]) ORDER BY id FOR NO KEY UPDATE",
+      [accounts],
+    );
     const sRes = await client.query(
-      "SELECT * FROM profiles WHERE auth_id = $1 FOR UPDATE",
+      "SELECT * FROM profiles WHERE auth_id = $1",
       [fromAuthId],
     );
     const source = sRes.rows[0];
     const tRes = await client.query(
-      "SELECT * FROM profiles WHERE auth_id = $1 FOR UPDATE",
+      "SELECT * FROM profiles WHERE auth_id = $1",
       [toAuthId],
     );
     const target = tRes.rows[0];
@@ -749,7 +903,9 @@ export async function linkProfiles(fromAuthId: string, toAuthId: string) {
     }
 
     const rewards = (
-      await client.query("SELECT * FROM rewards WHERE profile = $1", [source.id])
+      await client.query("SELECT * FROM rewards WHERE profile = $1", [
+        source.id,
+      ])
     ).rows;
     let xp = 0;
     let crowns = 0;
@@ -824,15 +980,16 @@ export async function linkProfiles(fromAuthId: string, toAuthId: string) {
           .sort((a, b) => a.attempts.length - b.attempts.length)[0];
         const mergedAttempts =
           best?.attempts ??
-          [...new Set([...(other.attempts || []), ...(run.attempts || [])])].slice(
-            0,
-            3,
-          );
+          [
+            ...new Set([...(other.attempts || []), ...(run.attempts || [])]),
+          ].slice(0, 3);
         await client.query(
           "UPDATE daily_attempts SET solved = $1, attempts = $2 WHERE id = $3",
           [!!best, JSON.stringify(mergedAttempts), other.id],
         );
-        await client.query("DELETE FROM daily_attempts WHERE id = $1", [run.id]);
+        await client.query("DELETE FROM daily_attempts WHERE id = $1", [
+          run.id,
+        ]);
       }
     }
 
@@ -866,8 +1023,6 @@ export async function linkProfiles(fromAuthId: string, toAuthId: string) {
     const targetUpdated = (
       await client.query("SELECT * FROM profiles WHERE id = $1", [target.id])
     ).rows[0];
-    await observeProfile(client, targetUpdated);
-
     await client.query(
       "UPDATE profiles SET auth_id = $1, leaderboard_eligible = false, last = NULL WHERE id = $2",
       [`linked:${fromAuthId}`, source.id],
@@ -875,6 +1030,7 @@ export async function linkProfiles(fromAuthId: string, toAuthId: string) {
     const sourceUpdated = (
       await client.query("SELECT * FROM profiles WHERE id = $1", [source.id])
     ).rows[0];
+    await observeProfile(client, targetUpdated);
     await observeProfile(client, sourceUpdated);
 
     await mergeActivity(client, source, target);
@@ -882,19 +1038,36 @@ export async function linkProfiles(fromAuthId: string, toAuthId: string) {
 }
 
 export async function recover() {
-  const now = Date.now();
+  const started = Date.now();
+  const result = { scanned: 0, due: 0, advanced: 0, failed: 0 };
   const rows = (
     await query(
-      "SELECT * FROM tournaments WHERE (status = 'lobby' OR status = 'active') AND updated_at < $1 LIMIT 100",
-      [now - 15_000],
+      "SELECT id, state FROM tournaments WHERE status IN ('lobby', 'active') AND updated_at < $1 ORDER BY updated_at, id LIMIT 50",
+      [started - 5000],
     )
   ).rows;
   for (const row of rows) {
-    await recordEvent(null, {
-      kind: "scheduler_recovery",
-      tournament: row.id,
-      at: now,
-    });
-    void driveBots(row.id, (row.state as Tournament).version);
+    // Leave time for the last database operation to finish within maxDuration.
+    if (Date.now() - started >= 20_000) break;
+    result.scanned++;
+    const t = row.state as Tournament;
+    if (!isOverdue(t, Date.now())) continue;
+    result.due++;
+    try {
+      // Recheck deadlines under the same lock as normal moves. Never invent a
+      // result or cancel a live player's turn merely because the process slept.
+      if (await driveBots(row.id, t.version, true)) result.advanced++;
+    } catch (error) {
+      result.failed++;
+      console.error("[royale] watchdog_failed", {
+        tournament: row.id,
+        code: (error as { code?: string }).code || "UNKNOWN",
+      });
+    }
   }
+  console.info("[royale] watchdog", {
+    ...result,
+    elapsedMs: Date.now() - started,
+  });
+  return result;
 }

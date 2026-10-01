@@ -1,16 +1,21 @@
 import { test, expect } from "@playwright/test";
-import { ConvexHttpClient, api } from "../lib/neon-client";
 
 test("public leaderboard matches the top ten without exposing private profile fields", async ({
   page,
 }, testInfo) => {
   test.skip(!process.env.DATABASE_URL, "Requires configured Neon database");
-  const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
+  const rpc = async (name: string) => {
+    const response = await page.request.post("/api/rpc", {
+      data: { name, args: {} },
+    });
+    expect(response.ok()).toBe(true);
+    return (await response.json()).result;
+  };
   await page.goto("/leaderboard");
   await expect(
     page.getByRole("heading", { name: "Top 10 players", exact: true }),
   ).toBeVisible();
-  const players = await client.query(api.leaderboard.top, {});
+  const players = await rpc("leaderboard.top");
   expect(players.length).toBeLessThanOrEqual(10);
   if (players.length) {
     await expect(page.locator(".leaderboard tbody tr")).toHaveCount(
