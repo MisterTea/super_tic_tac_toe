@@ -63,6 +63,15 @@ players, game records, or telemetry were modified by the stress harnesses.
   through 750 board clicks in 3.4 minutes. All 16 result screens, retained guest
   identities, exactly one crown, and exactly one reward per player were verified;
   there were no JavaScript errors or transient move failures.
+- Action fault injection stalls `royale.move` before server acceptance and after
+  acceptance with its response lost. Both hit the 12-second client deadline
+  (12,206 ms and 12,154 ms observed), show the timeout message, and release the
+  pending controls. The unaccepted optimistic move rolls back and can be retried;
+  an accepted move stays reconciled through polling. Each player move is recorded
+  exactly once, and the player can subsequently resign and reach results.
+- A separate browser test leaves a turn unanswered with the normal 15-second
+  clock. The server finishes the match for reason `clock`, shows the result, and
+  lets the same player host another Royale. All three timeout tests passed.
 
 Local results do not measure production Neon latency, cold starts, or deployment
 concurrency limits. The reproduced deadlock and missing client deadline are
