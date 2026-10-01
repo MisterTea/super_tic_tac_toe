@@ -170,7 +170,8 @@ that every first-round match receives a turn without starvation. This is
 cooperative scheduling on one process, not a production throughput benchmark.
 
 The independent watchdog is `GET /api/cron/royale`, protected by the server-only
-`CRON_SECRET`. Vercel runs it every minute. Each invocation examines at most
+`CRON_SECRET`. Vercel runs it every minute. Each invocation finishes its awaited work without starting timer callbacks.
+Each invocation examines at most
 50 stale active/lobby records in oldest-update order and stops starting new
 work after 20 seconds, with a 60-second function runtime limit. It awaits the
 normal driver, which rechecks deadlines and move sequences under the tournament
@@ -213,7 +214,24 @@ Keep destructive backend suites separate from concurrent browser/stress runs.
 Local stress does not reproduce every mobile browser, Neon cold start, or Vercel
 concurrency limit; production watchdog and slow-request logs remain useful.
 
-Final validation: 42 core/client/watchdog tests, 24 PostgreSQL backend tests,
+Final validation: 42 core/client/watchdog tests, 26 PostgreSQL backend tests,
 3 Python/TypeScript/PyTorch/WASM parity tests, and 34 browser tests passed
-(103 total). The single browser scenario for an unconfigured database skipped
+(105 total). The single browser scenario for an unconfigured database skipped
 on this configured server. TypeScript and the optimized production build passed.
+
+Production verification confirmed the protected endpoint rejects unauthenticated
+requests and Vercel registered the minutely job. Its first scheduled run advanced
+13 overdue games without failures. An overlapping manual run advanced five and
+reported three bounded lock timeouts; the next scheduled runs advanced 16 and
+10 respectively with no recovery failures.
+
+Runtime logs also showed background drivers returning from roughly 40-second-old
+transactions, consistent with Vercel suspending callbacks after a response.
+Production therefore disables in-memory wake timers entirely on Vercel:
+awaited dashboard requests and the independent minutely cron drive due states.
+Persistent local Node servers retain timers. The watchdog also suppresses timer
+creation on other hosts, so it cannot leave database work behind when returning.
+Regressions verify that no moves happen after a watchdog response, and that an
+expired Vercel lobby remains idle until an awaited request safely advances it.
+When no browser is observing a game, recorded transitions can lag their deadlines
+until the next cron run; move acceptance still checks the authoritative deadline.

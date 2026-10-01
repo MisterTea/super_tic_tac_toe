@@ -215,6 +215,7 @@ export async function save(
   id: string,
   t: Tournament,
   now: number,
+  scheduleWake = true,
 ) {
   await lockEntrants(client, t);
   const prevRes = await client.query(
@@ -279,7 +280,7 @@ export async function save(
   );
 
   const wake = nextWake(t, now);
-  if (wake !== null) {
+  if (scheduleWake && wake !== null) {
     scheduleBotDrive(id, t.version, Math.max(0, wake - now));
   }
 }
@@ -287,6 +288,12 @@ export async function save(
 export function scheduleBotDrive(id: string, version: number, delayMs: number) {
   const existing = wakeTimers.get(id);
   if (existing) clearTimeout(existing);
+  // Serverless processes can suspend these callbacks mid-transaction after
+  // responding. Production requests and the independent cron drive deadlines.
+  if (process.env.VERCEL === "1") {
+    wakeTimers.delete(id);
+    return;
+  }
   const timer = setTimeout(
     () => {
       wakeTimers.delete(id);
@@ -402,7 +409,7 @@ async function runBotDrive(tournamentId: string, watchdog: boolean) {
       submitMove(t, m.id, move.player, move.seq, move.action, now);
     }
     if (t.version !== before) {
-      await save(client, tournamentId, t, now);
+      await save(client, tournamentId, t, now, !watchdog);
       if (watchdog)
         await recordEvent(client, {
           kind: "scheduler_recovery",
@@ -412,7 +419,7 @@ async function runBotDrive(tournamentId: string, watchdog: boolean) {
       return true;
     } else {
       const wake = nextWake(t, now);
-      if (wake !== null)
+      if (!watchdog && wake !== null)
         scheduleBotDrive(tournamentId, t.version, Math.max(20, wake - now));
     }
     return false;

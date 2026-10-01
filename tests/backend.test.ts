@@ -903,6 +903,62 @@ describe("growth features", () => {
     }
   });
 
+  it("watchdog completes without launching post-response timer work", async () => {
+    const now = Date.now(),
+      id = crypto.randomUUID();
+    const state = newLobby(0, now, 1);
+    state.settings!.countdownMs = 0;
+    state.settings!.botDelayMs = 0;
+    state.settings!.clockMs = 60_000;
+    state.entrants.push({
+      id: "cpu-0",
+      name: "CPU",
+      cpu: true,
+      avatar: "●",
+      skill: 0,
+      points: 0,
+      moved: false,
+      wins: 0,
+      boards: 0,
+    });
+    startTournament(state, now);
+    advanceTime(state, now);
+    for (const e of state.entrants) e.skill = 0;
+    await query(
+      "INSERT INTO tournaments(id,tier,status,state,updated_at) VALUES($1,0,'active',$2,$3)",
+      [id, JSON.stringify(state), now - 10_000],
+    );
+    expect(await royale.recover()).toMatchObject({ advanced: 1, failed: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const saved = (
+      await query("SELECT state FROM tournaments WHERE id=$1", [id])
+    ).rows[0].state as Tournament;
+    expect(saved.matches.reduce((n, m) => n + m.state.moves.length, 0)).toBe(2);
+  });
+
+  it("uses awaited requests rather than background timers on Vercel", async () => {
+    vi.stubEnv("VERCEL", "1");
+    try {
+      const a = await player("Serverless");
+      const id = await royale.join(a.authId);
+      const state = (
+        await query("SELECT state FROM tournaments WHERE id=$1", [id])
+      ).rows[0].state as Tournament;
+      state.closesAt = Date.now() + 10;
+      await withTransaction((c) => royale.save(c, id, state, Date.now()));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(
+        (await query("SELECT status FROM tournaments WHERE id=$1", [id]))
+          .rows[0].status,
+      ).toBe("lobby");
+      expect((await royale.dashboard(a.authId)).tournament?.status).toBe(
+        "active",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   afterAll(async () => {
     await getPool().end();
   });
