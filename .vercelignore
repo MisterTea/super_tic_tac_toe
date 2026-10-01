@@ -1,0 +1,18 @@
+# Upload only application sources and assets. Local stress data stays local.
+artifacts/
+test-results/
+playwright-report/
+training/
+.venv/
+__pycache__/
+.git/
+node_modules/
+.next/
+.env*
+!.env.example
+*.tsbuildinfo
+public/ai/ort/
+scripts/stress-*.ts
+preview.png
+skill-preview.png
+production-preview.png
